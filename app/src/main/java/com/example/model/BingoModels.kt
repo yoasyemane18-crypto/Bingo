@@ -1,0 +1,143 @@
+package com.example.model
+
+enum class AppLanguage(val code: String, val displayName: String, val shortLabel: String) {
+  EN("en", "English", "EN"),
+  AM("am", "አማርኛ", "አማ"),
+  TI("ti", "ትግርኛ", "ትግ")
+}
+
+enum class Screen {
+  HOME,
+  REGISTER,
+  PLAY_LOBBY,
+  GAME,
+  SCHEDULE,
+  HOW_TO_PLAY,
+  ABOUT_US,
+  CONTACT_US,
+  FAQS,
+  ADMIN
+}
+
+data class BingoCell(
+  val col: Int,
+  val row: Int,
+  val number: Int, // 0 for FREE space
+  val isMarked: Boolean = false,
+  val isWinning: Boolean = false
+) {
+  val isFree: Boolean get() = (col == 2 && row == 2) || number == 0
+}
+
+data class BingoCard(
+  val cardNum: Int,
+  val seed: Long,
+  val grid: List<List<Int>>, // 5 columns x 5 rows
+  val markedCells: Set<Pair<Int, Int>> = setOf(Pair(2, 2)), // col to row
+  val winningCells: Set<Pair<Int, Int>> = emptySet()
+) {
+  fun isMarked(col: Int, row: Int): Boolean =
+    (col == 2 && row == 2) || markedCells.contains(Pair(col, row))
+}
+
+data class GoalPattern(
+  val cells: List<Pair<Int, Int>> // col to row coordinates
+)
+
+data class BingoGoal(
+  val id: String,
+  val nameEn: String,
+  val nameAm: String,
+  val nameTi: String,
+  val patterns: List<GoalPattern>
+) {
+  fun name(lang: AppLanguage): String = when (lang) {
+    AppLanguage.EN -> nameEn
+    AppLanguage.AM -> nameAm
+    AppLanguage.TI -> nameTi
+  }
+}
+
+data class GameSlot(
+  val hourUtc: Int, // Ethiopian time hour (UTC+3 offset)
+  val labelEn: String,
+  val labelAm: String,
+  val labelTi: String
+) {
+  fun label(lang: AppLanguage): String = when (lang) {
+    AppLanguage.EN -> labelEn
+    AppLanguage.AM -> labelAm
+    AppLanguage.TI -> labelTi
+  }
+}
+
+data class CardOwnership(
+  val cardNum: Int,
+  val seed: Long,
+  val dayEpoch: Long,
+  val leftPlays: Int = 3
+)
+
+data class WalletTransaction(
+  val id: String,
+  val label: String,
+  val amount: Int,
+  val timestamp: Long = System.currentTimeMillis()
+)
+
+data class UserProfile(
+  val username: String,
+  val phone: String,
+  val playingTime: String,
+  val passwordHash: String,
+  val walletBalance: Int = 0,
+  val ownedCards: Map<String, CardOwnership> = emptyMap(),
+  val transactions: List<WalletTransaction> = emptyList()
+)
+
+enum class RequestStatus {
+  PENDING,
+  APPROVED,
+  DECLINED
+}
+
+data class PaymentRequest(
+  val id: String,
+  val username: String,
+  val phone: String,
+  val amountBirr: Int,
+  val receiptId: String,
+  val receiptLink: String,
+  val timestamp: Long = System.currentTimeMillis(),
+  val status: RequestStatus = RequestStatus.PENDING
+)
+
+data class WithdrawalRequest(
+  val id: String,
+  val username: String,
+  val phone: String,
+  val amountBirr: Int,
+  val telebirrAccount: String,
+  val timestamp: Long = System.currentTimeMillis(),
+  val status: RequestStatus = RequestStatus.PENDING
+)
+
+data class WinnerRecord(
+  val id: String,
+  val username: String,
+  val phone: String,
+  val slotLabel: String,
+  val roundNumber: Int,
+  val rewardBirr: Int,
+  val cardNum: Int,
+  val callCount: Int,
+  val timestamp: Long = System.currentTimeMillis()
+)
+
+data class ActiveRound(
+  val roundNumber: Int, // 1, 2, or 3
+  val roundId: String,
+  val startTime: Long,
+  val endTime: Long,
+  val slotLabel: String
+)

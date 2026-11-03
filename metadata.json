@@ -1,0 +1,6 @@
+{
+  "name": "YEME BINGO",
+  "description": "Ethiopian scheduled Bingo game with Telebirr payments, practice mode, 500 cartelas, and multilingual voice calling.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Bingo card outer gold container -->
+    <path
+        android:fillColor="#F0C75E"
+        android:pathData="M32,26h44c3.3,0 6,2.7 6,6v44c0,3.3 -2.7,6 -6,6h-44c-3.3,0 -6,-2.7 -6,-6v-44c0,-3.3 2.7,-6 6,-6z" />
+    <!-- Inner purple card surface -->
+    <path
+        android:fillColor="#2A0F55"
+        android:pathData="M34,29h40c2,0 3.6,1.6 3.6,3.6v39c0,2 -1.6,3.6 -3.6,3.6h-40c-2,0 -3.6,-1.6 -3.6,-3.6v-39c0,-2 1.6,-3.6 3.6,-3.6z" />
+    <!-- Top header bar for BINGO letters -->
+    <path
+        android:fillColor="#7B2FF7"
+        android:pathData="M34,29h40c2,0 3.6,1.6 3.6,3.6v8.4h-47.2v-8.4c0,-2 1.6,-3.6 3.6,-3.6z" />
+    <!-- Header golden dots (representing B-I-N-G-O) -->
+    <path
+        android:fillColor="#F0C75E"
+        android:pathData="M39,35m-1.5,0a1.5,1.5 0 1,0 3,0a1.5,1.5 0 1,0 -3,0" />
+    <path
+        android:fillColor="#F0C75E"
+        android:pathData="M46.5,35m-1.5,0a1.5,1.5 0 1,0 3,0a1.5,1.5 0 1,0 -3,0" />
+    <path
+        android:fillColor="#F0C75E"
+        android:pathData="M54,35m-1.5,0a1.5,1.5 0 1,0 3,0a1.5,1.5 0 1,0 -3,0" />
+    <path
+        android:fillColor="#F0C75E"
+        android:pathData="M61.5,35m-1.5,0a1.5,1.5 0 1,0 3,0a1.5,1.5 0 1,0 -3,0" />
+    <path
+        android:fillColor="#F0C75E"
+        android:pathData="M69,35m-1.5,0a1.5,1.5 0 1,0 3,0a1.5,1.5 0 1,0 -3,0" />
+    <!-- Golden Center Star ★ -->
+    <path
+        android:fillColor="#F0C75E"
+        android:pathData="M54,49l2.4,5.2 5.7,0.8 -4.2,4 1,5.7 -4.9,-2.7 -4.9,2.7 1,-5.7 -4.2,-4 5.7,-0.8z" />
+    <!-- Number grid indicators -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M41,47h5v5h-5z M62,47h5v5h-5z M41,60h5v5h-5z M62,60h5v5h-5z" />
+</vector>
