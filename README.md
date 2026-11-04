@@ -80,6 +80,17 @@ gradle :app:testDebugUnitTest
 
 ---
 
+## ⚡ GitHub Actions CI/CD
+
+This repository includes a ready-to-use GitHub Actions workflow configured in `.github/workflows/android.yml`:
+
+- **Automatic Builds**: Triggers on every push to `main` or `master` branches and pull requests.
+- **Manual Trigger**: Go to the **Actions** tab on GitHub, select **Android CI & APK Build**, and click **Run workflow** to build anytime.
+- **Artifacts**: Every workflow run generates and uploads `YemeBingo-Debug-APK` directly under the **Artifacts** section of the Actions run summary.
+- **Automatic Releases**: Pushing any tag starting with `v` (e.g. `v1.0.0`) automatically creates a GitHub Release with the compiled APK attached.
+
+---
+
 ## 📦 How to Publish to GitHub Releases
 
 1. **Push your code to GitHub**:
