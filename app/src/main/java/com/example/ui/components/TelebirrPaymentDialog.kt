@@ -259,38 +259,12 @@ fun TelebirrPaymentDialog(
         Spacer(modifier = Modifier.height(16.dp))
 
         // Receipt Verification Section
-        OutlinedTextField(
+        PasteableReceiptTextField(
           value = receiptInput,
           onValueChange = { receiptInput = it },
-          label = { Text("Telebirr Receipt ID or Link") },
-          placeholder = { Text("CL240899128 or SMS text") },
-          singleLine = true,
-          trailingIcon = {
-            Text(
-              text = "Paste",
-              color = BingoGold,
-              fontWeight = FontWeight.Bold,
-              fontSize = 13.sp,
-              modifier = Modifier
-                .clickable {
-                  val clipText = clipboard.getText()?.text
-                  if (!clipText.isNullOrEmpty()) {
-                    receiptInput = clipText
-                  }
-                }
-                .padding(end = 12.dp)
-            )
-          },
-          modifier = Modifier
-            .fillMaxWidth()
-            .testTag("telebirr_receipt_input"),
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = BingoGold,
-            unfocusedBorderColor = BingoBorderLight,
-            focusedTextColor = BingoTextWhite,
-            unfocusedTextColor = BingoTextWhite
-          ),
-          shape = RoundedCornerShape(12.dp)
+          label = "Telebirr Receipt ID or Link",
+          placeholder = "CL240899128, https://... or SMS text",
+          testTag = "telebirr_receipt_input"
         )
 
         if (!errorMessage.isNullOrEmpty()) {

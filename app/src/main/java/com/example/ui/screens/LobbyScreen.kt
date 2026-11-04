@@ -67,6 +67,7 @@ import com.example.model.UserProfile
 import com.example.model.WithdrawalRequest
 import com.example.ui.components.CountdownCard
 import com.example.ui.components.LuxuryButton
+import com.example.ui.components.PasteableReceiptTextField
 import com.example.ui.theme.BingoBorderLight
 import com.example.ui.theme.BingoBorderPurple
 import com.example.ui.theme.BingoCardBg
@@ -675,21 +676,12 @@ fun LobbyScreen(
 
               Spacer(modifier = Modifier.height(8.dp))
 
-              OutlinedTextField(
+              PasteableReceiptTextField(
                 value = depositReceipt,
                 onValueChange = { depositReceipt = it },
-                label = { Text("Telebirr receipt link or number") },
-                placeholder = { Text("https://transactioninfo.ethiotelecom.et/receipt/...") },
-                singleLine = true,
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .testTag("deposit_receipt_input"),
-                colors = OutlinedTextFieldDefaults.colors(
-                  focusedBorderColor = BingoGold,
-                  unfocusedBorderColor = BingoBorderLight,
-                  focusedTextColor = BingoTextWhite,
-                  unfocusedTextColor = BingoTextWhite
-                )
+                label = "Telebirr receipt link or number",
+                placeholder = "https://transactioninfo.ethiotelecom.et/receipt/... or CL...",
+                testTag = "deposit_receipt_input"
               )
 
               Spacer(modifier = Modifier.height(10.dp))
