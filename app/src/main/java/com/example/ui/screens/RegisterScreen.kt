@@ -336,7 +336,7 @@ fun RegisterScreen(
           )
           Text(
             text = when (language) {
-              AppLanguage.EN -> "Login"
+              AppLanguage.EN -> "Sign In"
               AppLanguage.AM -> "ግባ"
               AppLanguage.TI -> "እቶ"
             },
@@ -344,7 +344,7 @@ fun RegisterScreen(
             fontWeight = FontWeight.Bold,
             fontSize = 15.sp,
             modifier = Modifier
-              .clickable { onNavigate(Screen.HOME) }
+              .clickable { onNavigate(Screen.SIGN_IN) }
               .testTag("register_to_login_link")
           )
         }

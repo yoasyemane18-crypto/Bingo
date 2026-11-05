@@ -3,13 +3,35 @@ package com.example.model
 object StringsDictionary {
 
   val SLOTS = listOf(
-    GameSlot(10, "4:00 O’clock Day", "4:00 ሰዓት ቀን", "4:00 ሰዓት መዓልቲ"),
-    GameSlot(12, "6:00 O’clock Day", "6:00 ሰዓት ቀን", "6:00 ሰዓት መዓልቲ"),
-    GameSlot(14, "8:00 O’clock Day", "8:00 ሰዓት ቀን", "8:00 ሰዓት መዓልቲ"),
-    GameSlot(16, "10:00 O’clock Day", "10:00 ሰዓት ቀን", "10:00 ሰዓት መዓልቲ"),
-    GameSlot(18, "12:00 O’clock Day", "12:00 ሰዓት ቀን", "12:00 ሰዓት መዓልቲ"),
-    GameSlot(20, "2:00 O’clock Night", "2:00 ሰዓት ሌሊት", "2:00 ሰዓት ለይቲ")
+    GameSlot(10, 4, "4:00 O’clock (Morning 10:00 AM)", "4:00 ሰዓት (ጠዋት)", "4:00 ሰዓት (ንጉሆ)"),
+    GameSlot(12, 6, "6:00 O’clock (Midday 12:00 PM)", "6:00 ሰዓት (ቀትር)", "6:00 ሰዓት (ቀትሪ)"),
+    GameSlot(14, 8, "8:00 O’clock (Afternoon 2:00 PM)", "8:00 ሰዓት (ከሰዓት)", "8:00 ሰዓት (ድሕሪ ቀትሪ)"),
+    GameSlot(16, 10, "10:00 O’clock (Afternoon 4:00 PM)", "10:00 ሰዓት (ከሰዓት)", "10:00 ሰዓት (ድሕሪ ቀትሪ)"),
+    GameSlot(18, 12, "12:00 O’clock (Dusk 6:00 PM)", "12:00 ሰዓት (ምሽት)", "12:00 ሰዓት (ምሸት)"),
+    GameSlot(20, 2, "2:00 O’clock (Night 8:00 PM)", "2:00 ሰዓት (ምሽት)", "2:00 ሰዓት (ምሸት)")
   )
+
+  fun findSlot(label: String?): GameSlot? {
+    if (label.isNullOrBlank()) return null
+    val clean = label.trim().lowercase().replace('’', '\'')
+
+    // 1. Exact match on normalized labels
+    SLOTS.firstOrNull { slot ->
+      slot.labelEn.lowercase().replace('’', '\'') == clean ||
+      slot.labelAm.lowercase().replace('’', '\'') == clean ||
+      slot.labelTi.lowercase().replace('’', '\'') == clean
+    }?.let { return it }
+
+    // 2. Ethiopian hour prefix / keyword matching
+    if (clean.startsWith("4:00") || clean.contains("ጠዋት 4:00") || clean.contains("10:00 am")) return SLOTS[0]
+    if (clean.startsWith("6:00") || clean.contains("ቀትር 6:00") || clean.contains("12:00 pm")) return SLOTS[1]
+    if (clean.startsWith("8:00") || clean.contains("ከሰዓት 8:00") || clean.contains("2:00 pm")) return SLOTS[2]
+    if (clean.startsWith("10:00") || clean.contains("ከሰዓት 10:00") || clean.contains("4:00 pm")) return SLOTS[3]
+    if (clean.startsWith("12:00") || clean.contains("ምሽት 12:00") || clean.contains("6:00 pm")) return SLOTS[4]
+    if (clean.startsWith("2:00") || clean.contains("ምሽት 2:00") || clean.contains("8:00 pm")) return SLOTS[5]
+
+    return null
+  }
 
   // Amharic numerals pronunciation dictionary
   val AM_ONES = listOf("", "አንድ", "ሁለት", "ሶስት", "አራት", "አምስት", "ስድስት", "ሰባት", "ስምንት", "ዘጠኝ")

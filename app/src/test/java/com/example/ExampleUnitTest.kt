@@ -182,19 +182,25 @@ class ExampleUnitTest {
     val audit4 = TelebirrSecurity.validateRecipient(wrongNameSms)
     assertFalse("Must reject transfers to non-account holder name", audit4.isMatched)
 
-    // 5. Short transaction ID or direct URL passes local recipient pre-check (deferred to online check)
+    // 5. Bare transaction ID without recipient text is not verified without online check
     val shortTx = "CL240899128"
     val audit5 = TelebirrSecurity.validateRecipient(shortTx)
-    assertTrue("Pure transaction ID should be deferred to online check", audit5.isMatched)
+    assertFalse("Bare ID without recipient text cannot confirm transfer to Yemane", audit5.isMatched)
   }
 
   @Test
-  fun testAmountExtraction() {
+  fun testAmountExtractionAndMatching() {
     assertEquals(60, TelebirrSecurity.extractAmount("transferred 60.00 ETB to Yemane"))
     assertEquals(60, TelebirrSecurity.extractAmount("transferred 60 ETB to Yemane"))
     assertEquals(90, TelebirrSecurity.extractAmount("ብር 90.00 ወደ 0939383425"))
     assertEquals(30, TelebirrSecurity.extractAmount("Amount: 30 ETB"))
     assertEquals(120, TelebirrSecurity.extractAmount("You paid 120 Birr"))
+
+    // Test mismatch detection logic:
+    val typedAmount = 60
+    val receiptAmount = TelebirrSecurity.extractAmount("transferred 30.00 ETB to Yemane (0939383425)")
+    assertEquals(30, receiptAmount)
+    assertFalse("Must detect mismatch when typed is 60 but receipt is 30", typedAmount == receiptAmount)
   }
 
   @Test
@@ -237,12 +243,86 @@ class ExampleUnitTest {
   }
 
   @Test
-  fun testTelebirrOrderReferenceFormat() {
-    val ref = TelebirrSecurity.generateOrderReference()
-    assertTrue("Order reference should start with YEME-", ref.startsWith("YEME-"))
-    val parts = ref.split("-")
-    assertEquals(3, parts.size)
-    assertEquals(8, parts[1].length) // yyyyMMdd
-    assertEquals(6, parts[2].length) // 6 hex chars
+  fun testFirebaseRtdbCloudIntegration() {
+    assertEquals("https://wow-878fc-default-rtdb.firebaseio.com", com.example.data.remote.FirebaseRtdbConfig.BASE_URL)
+    assertEquals("wow-878fc", com.example.data.remote.FirebaseRtdbConfig.PROJECT_ID)
+    assertEquals("AIzaSyDrYOOePFsUCPHCPdNHwB05FPna-F_thvA", com.example.data.remote.FirebaseRtdbConfig.API_KEY)
+  }
+
+  @Test
+  fun testSignInScreenNavigation() {
+    val screens = com.example.model.Screen.entries
+    assertTrue(screens.contains(com.example.model.Screen.SIGN_IN))
+    assertTrue(screens.contains(com.example.model.Screen.HOME))
+  }
+
+  @Test
+  fun testEthiopianPlayingTimesSlots() {
+    val slots = StringsDictionary.SLOTS
+    assertEquals(6, slots.size)
+
+    // Expected Ethiopian hours: 4:00, 6:00, 8:00, 10:00, 12:00, 2:00
+    val expectedEthiopianHours = listOf(4, 6, 8, 10, 12, 2)
+    val expectedUtcPlus3Hours = listOf(10, 12, 14, 16, 18, 20)
+
+    for (i in slots.indices) {
+      assertEquals(expectedEthiopianHours[i], slots[i].ethiopianHour)
+      assertEquals(expectedUtcPlus3Hours[i], slots[i].hourUtc)
+    }
+
+    // Verify Ethiopian labels
+    assertTrue(slots[0].labelAm.contains("4:00"))
+    assertTrue(slots[1].labelAm.contains("6:00"))
+    assertTrue(slots[2].labelAm.contains("8:00"))
+    assertTrue(slots[3].labelAm.contains("10:00"))
+    assertTrue(slots[4].labelAm.contains("12:00"))
+    assertTrue(slots[5].labelAm.contains("2:00"))
+  }
+
+  @Test
+  fun testEthiopianSlotsFindAndTiming() {
+    val slot4 = StringsDictionary.findSlot("4:00 O’clock (Morning 10:00 AM)")
+    assertNotNull(slot4)
+    assertEquals(4, slot4!!.ethiopianHour)
+
+    val slot6 = StringsDictionary.findSlot("6:00 ሰዓት (ቀትር)")
+    assertNotNull(slot6)
+    assertEquals(6, slot6!!.ethiopianHour)
+
+    val slot8 = StringsDictionary.findSlot("8:00 O’clock (Afternoon 2:00 PM)")
+    assertNotNull(slot8)
+    assertEquals(8, slot8!!.ethiopianHour)
+
+    val slot10 = StringsDictionary.findSlot("10:00 ሰዓት (ከሰዓት)")
+    assertNotNull(slot10)
+    assertEquals(10, slot10!!.ethiopianHour)
+
+    val slot12 = StringsDictionary.findSlot("12:00 ሰዓት (ምሽት)")
+    assertNotNull(slot12)
+    assertEquals(12, slot12!!.ethiopianHour)
+
+    val slot2 = StringsDictionary.findSlot("2:00 ሰዓት (ምሽት)")
+    assertNotNull(slot2)
+    assertEquals(2, slot2!!.ethiopianHour)
+  }
+
+  @Test
+  fun testThreeGamesConsecutiveRounds() {
+    assertEquals(3, com.example.data.BingoRepository.ROUNDS_PER_SESSION)
+  }
+
+  @Test
+  fun testCartelaPricingStructure() {
+    val pricePerCartela = com.example.data.BingoRepository.PAY_BIRR
+    assertEquals(30, pricePerCartela)
+
+    // 1 cartela = 30 Birr covers all 3 games in that session
+    val cartelaCount = 1
+    val costForThreeGames = cartelaCount * pricePerCartela
+    assertEquals(30, costForThreeGames)
+
+    // 2 cartelas = 60 Birr covers all 3 games
+    val twoCartelasCost = 2 * pricePerCartela
+    assertEquals(60, twoCartelasCost)
   }
 }

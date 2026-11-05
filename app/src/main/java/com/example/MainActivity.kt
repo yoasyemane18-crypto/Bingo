@@ -43,6 +43,7 @@ import com.example.ui.screens.GameScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.HowToPlayScreen
 import com.example.ui.screens.LobbyScreen
+import com.example.ui.screens.LoginScreen
 import com.example.ui.screens.RegisterScreen
 import com.example.ui.screens.ScheduleScreen
 import com.example.ui.theme.BingoNight
@@ -136,6 +137,13 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             onStartFreePlay = { viewModel.startPracticeGame() }
           )
 
+          Screen.SIGN_IN -> LoginScreen(
+            language = uiState.language,
+            onLogin = { u, p -> viewModel.login(u, p) },
+            onNavigateToRegister = { viewModel.navigateTo(Screen.REGISTER) },
+            onBack = { viewModel.navigateTo(Screen.HOME) }
+          )
+
           Screen.REGISTER -> RegisterScreen(
             language = uiState.language,
             onRegister = { u, ph, t, p -> viewModel.register(u, ph, t, p) },
@@ -152,6 +160,8 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             previewCard = uiState.previewCard,
             paymentRequests = uiState.paymentRequests,
             withdrawalRequests = uiState.withdrawalRequests,
+            isCountdownFinished = uiState.isCountdownFinished,
+            hasCartelaTicket = uiState.hasCartelaTicketForSession,
             onCardSelected = { num -> viewModel.selectCard(num) },
             onRefreshSeed = { viewModel.refreshSeed() },
             onStartGame = {
@@ -161,6 +171,7 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
                 viewModel.startPracticeGame()
               }
             },
+            onStartPracticeGame = { viewModel.startPracticeGame() },
             onOpenTelebirrGateway = { count -> viewModel.openTelebirrGatewayForGameEntry(count) },
             onSubmitPayment = { amt, r -> viewModel.submitPayment(amt, r) },
             onSubmitWithdrawal = { amt, acct -> viewModel.submitWithdrawal(amt, acct) },
@@ -185,6 +196,12 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             showConfetti = uiState.showConfetti,
             winnerCardNum = uiState.winnerCardNum,
             winnerCallsCount = uiState.winnerCallsCount,
+            currentRoundNumber = uiState.currentRoundNumber,
+            totalSessionRounds = uiState.totalSessionRounds,
+            isIntermission = uiState.isIntermission,
+            intermissionSecondsLeft = uiState.intermissionSecondsLeft,
+            sessionSummaryDialog = uiState.sessionSummaryDialog,
+            sessionTotalWonBirr = uiState.sessionTotalWonBirr,
             onCardTabSelected = { idx -> viewModel.setActiveCardIndex(idx) },
             onCellTapped = { cIdx, col, row -> viewModel.tapCell(cIdx, col, row) },
             onClaimBingo = { viewModel.claimBingo() },
@@ -195,7 +212,9 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
               viewModel.stopGame()
               viewModel.navigateTo(Screen.PLAY_LOBBY)
             },
-            onDismissWinDialog = { viewModel.dismissWinDialog() }
+            onDismissWinDialog = { viewModel.dismissWinDialog() },
+            onSkipIntermission = { viewModel.skipIntermissionNow() },
+            onDismissSessionSummary = { viewModel.dismissSessionSummaryDialog() }
           )
 
           Screen.SCHEDULE -> ScheduleScreen(
@@ -232,7 +251,8 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             onApproveWithdrawal = { id -> viewModel.adminApproveWithdrawal(id) },
             onDeclineWithdrawal = { id -> viewModel.adminDeclineWithdrawal(id) },
             onAdjustBalance = { u, delta -> viewModel.adminAdjustUserBalance(u, delta) },
-            onDeleteUser = { u -> viewModel.adminDeleteUser(u) }
+            onDeleteUser = { u -> viewModel.adminDeleteUser(u) },
+            onRefreshData = { viewModel.refreshData(syncRemote = true) }
           )
         }
 

@@ -107,9 +107,12 @@ fun LobbyScreen(
   previewCard: BingoCard,
   paymentRequests: List<PaymentRequest>,
   withdrawalRequests: List<WithdrawalRequest>,
+  isCountdownFinished: Boolean = false,
+  hasCartelaTicket: Boolean = false,
   onCardSelected: (Int) -> Unit,
   onRefreshSeed: () -> Unit,
   onStartGame: () -> Unit,
+  onStartPracticeGame: () -> Unit = {},
   onOpenTelebirrGateway: (Int) -> Unit = {},
   onSubmitPayment: (Int, String) -> Unit,
   onSubmitWithdrawal: (Int, String) -> Unit,
@@ -323,21 +326,21 @@ fun LobbyScreen(
 
     Spacer(modifier = Modifier.height(10.dp))
 
-    // Cartela Selection Summary Text
+    // Cartela Selection Summary Text (30 Birr for all 3 consecutive games)
     val selectedCount = selectedCardsList.size
     val cost = selectedCount * BingoRepository.PAY_BIRR
     val summaryText = if (selectedCount > 0) {
       val sortedStr = selectedCardsList.sorted().joinToString(", #")
       when (language) {
-        AppLanguage.EN -> "$selectedCount cartela(s) selected (#$sortedStr) · $cost birr"
-        AppLanguage.AM -> "$selectedCount ካርቴላ ተመርጧል (#$sortedStr) · $cost ብር"
-        AppLanguage.TI -> "$selectedCount ካርቴላ ተመሪጹ (#$sortedStr) · $cost ብር"
+        AppLanguage.EN -> "$selectedCount cartela(s) (#$sortedStr) · $cost birr (Covers all 3 games)"
+        AppLanguage.AM -> "$selectedCount ካርቴላ (#$sortedStr) · $cost ብር (ለ 3ቱም ተከታታይ ጨዋታዎች)"
+        AppLanguage.TI -> "$selectedCount ካርቴላ (#$sortedStr) · $cost ብር (ን 3ቲኦም ተኸታተልቲ ጸወታታት)"
       }
     } else {
       when (language) {
-        AppLanguage.EN -> "No card selected"
-        AppLanguage.AM -> "ምንም ካርድ አልተመረጠም"
-        AppLanguage.TI -> "ዋላ ሓደ ካርድ ኣይተመረጸን"
+        AppLanguage.EN -> "No card selected · 30 birr for 3 games"
+        AppLanguage.AM -> "ምንም ካርድ አልተመረጠም · 30 ብር ለ 3 ጨዋታዎች"
+        AppLanguage.TI -> "ዋላ ሓደ ካርድ ኣይተመረጸን · 30 ብር ን 3 ጸወታታት"
       }
     }
 
@@ -346,6 +349,17 @@ fun LobbyScreen(
       color = BingoGold,
       fontWeight = FontWeight.Bold,
       fontSize = 15.sp,
+      textAlign = TextAlign.Center
+    )
+
+    Text(
+      text = when (language) {
+        AppLanguage.EN -> "1 cartela = 30 Birr for 3 consecutive games in this session"
+        AppLanguage.AM -> "1 ካርቴላ = 30 ብር ለ 3ቱ ተከታታይ ጨዋታዎች"
+        AppLanguage.TI -> "1 ካርቴላ = 30 ብር ን 3ቲኦም ተኸታተልቲ ጸወታታት"
+      },
+      color = BingoGoldLight,
+      fontSize = 12.sp,
       textAlign = TextAlign.Center
     )
 
@@ -459,26 +473,86 @@ fun LobbyScreen(
     Spacer(modifier = Modifier.height(18.dp))
 
     // Start Game / Join Game Action Button
-    LuxuryButton(
-      text = if (currentUser != null) {
+    val buttonText = if (currentUser != null) {
+      if (isCountdownFinished) {
         when (language) {
-          AppLanguage.EN -> "Join Game · $cost birr"
-          AppLanguage.AM -> "ጨዋታውን ተቀላቀል · $cost ብር"
-          AppLanguage.TI -> "ኣብ ጸወታ ተሳተፍ · $cost ብር"
+          AppLanguage.EN -> "▶ Start Game Now · 3 Games ($cost birr)"
+          AppLanguage.AM -> "▶ ጨዋታውን አሁኑኑ ጀምር · 3 ጨዋታዎች ($cost ብር)"
+          AppLanguage.TI -> "▶ ጸወታ ሕጂ ጀምር · 3 ጸወታታት ($cost ብር)"
+        }
+      } else if (hasCartelaTicket) {
+        when (language) {
+          AppLanguage.EN -> "⏳ Cartela Ready · Starts in $countdownText"
+          AppLanguage.AM -> "⏳ ካርቴላ ተዘጋጅቷል · በ $countdownText ይጀምራል"
+          AppLanguage.TI -> "⏳ ካርቴላ ተዳልዩ · ብ $countdownText ይጅምር"
         }
       } else {
         when (language) {
-          AppLanguage.EN -> "Start Game (Practice)"
-          AppLanguage.AM -> "ጨዋታ ጀምር (ልምምድ)"
-          AppLanguage.TI -> "ጸወታ ጀምር (ልምምድ)"
+          AppLanguage.EN -> "Buy Cartela for 3 Games ($cost birr)"
+          AppLanguage.AM -> "ለ 3ቱ ጨዋታዎች ካርቴላ ይግዙ ($cost ብር)"
+          AppLanguage.TI -> "ን 3ቲኦም ጸወታታት ካርቴላ ዓድጉ ($cost ብር)"
         }
-      },
+      }
+    } else {
+      when (language) {
+        AppLanguage.EN -> "Start Game (Practice)"
+        AppLanguage.AM -> "ጨዋታ ጀምር (ልምምድ)"
+        AppLanguage.TI -> "ጸወታ ጀምር (ልምምድ)"
+      }
+    }
+
+    LuxuryButton(
+      text = buttonText,
       onClick = onStartGame,
       isGold = true,
       testTag = "lobby_start_game_button"
     )
 
     if (currentUser != null) {
+      Spacer(modifier = Modifier.height(6.dp))
+      Text(
+        text = if (isCountdownFinished) {
+          when (language) {
+            AppLanguage.EN -> "⏰ Playing Time Active! You will play 3 consecutive games."
+            AppLanguage.AM -> "⏰ የጨዋታ ሰዓት ደርሷል! 3 ተከታታይ ጨዋታዎችን ይጫወታሉ።"
+            AppLanguage.TI -> "⏰ ናይ ጸወታ ሰዓት በጺሑ! 3 ተኸታተልቲ ጸወታታት ክትጻወቱ ኢኹም።"
+          }
+        } else {
+          when (language) {
+            AppLanguage.EN -> "⏰ Playing Time: ${currentUser.playingTime}\nGame starts only when countdown finishes. 3 games in 1 session."
+            AppLanguage.AM -> "⏰ የጨዋታ ሰዓት፡ ${currentUser.playingTime}\nጨዋታው የሚጀምረው ቆጣሪው ሲያልቅ ብቻ ነው። 3 ተከታታይ ጨዋታዎች በአንድ ክፍለ ጊዜ።"
+            AppLanguage.TI -> "⏰ ናይ ጸወታ ሰዓት፡ ${currentUser.playingTime}\nጸወታ ዝጅምር እቲ ቆጻሪ ምስ ወደአ ጥራይ እዩ። 3 ተኸታተልቲ ጸወታታት።"
+          }
+        },
+        color = BingoGoldLight,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth()
+      )
+
+      Spacer(modifier = Modifier.height(10.dp))
+      OutlinedButton(
+        onClick = onStartPracticeGame,
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(44.dp)
+          .testTag("practice_while_waiting_button"),
+        shape = RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold.copy(alpha = 0.7f))
+      ) {
+        Text(
+          text = when (language) {
+            AppLanguage.EN -> "🎮 Play Practice Game While Waiting"
+            AppLanguage.AM -> "🎮 እየጠበቁ ሳሉ የልምምድ ጨዋታ ይጫወቱ"
+            AppLanguage.TI -> "🎮 እናተጸበኹም ናይ ልምምድ ጸወታ ተጻወቱ"
+          },
+          color = BingoGoldLight,
+          fontWeight = FontWeight.SemiBold,
+          fontSize = 13.sp
+        )
+      }
+
       Spacer(modifier = Modifier.height(10.dp))
       OutlinedButton(
         onClick = { onOpenTelebirrGateway(selectedCardsList.size.coerceAtLeast(1)) },

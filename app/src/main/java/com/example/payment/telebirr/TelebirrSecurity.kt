@@ -116,52 +116,65 @@ object TelebirrSecurity {
   }
 
   /**
-   * Extracts recipient phone and name from SMS text or input payload.
+   * Extracts recipient phone and name from SMS text, HTML, or input payload.
    */
   fun extractReceiverDetails(rawInput: String): Pair<String?, String?> {
     val clean = rawInput.trim()
     if (clean.isEmpty()) return Pair(null, null)
 
-    // Check for explicit transfer patterns:
-    // e.g., "to Yemane (0939383425)" or "ወደ 0939383425 (Yemane)"
+    // Strip HTML tags so table cells/spans/divs become clean text
+    val text = if (clean.contains("<") && clean.contains(">")) {
+      clean.replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ")
+    } else {
+      clean
+    }
+
+    // 1. Check for explicit transfer patterns with receiver context:
+    // e.g., "to Yemane (0939383425)", "Credited party: Yemane (0939383425)", "ወደ 0939383425 (Yemane)", "Credited Party: 0939383425 (Yemane)"
     val phoneWithContextRegex = Regex(
-      """(?:to|ወደ|recipient|receiver|ተቀባይ|party)[:\s]+(?:([A-Za-z\u1200-\u137F]+)\s*)?\(?(\+?2519\d{8}|09\d{8})\)?""",
+      """(?:to|ወደ|recipient|receiver|ተቀባይ|credited\s*party|credited\s*to|beneficiary)[:\s]+(?:([A-Za-z\u1200-\u137F\s]{2,30})\s*)?\(?(\+?2519\d{8}|09\d{8})\)?""",
       RegexOption.IGNORE_CASE
     )
-    val match1 = phoneWithContextRegex.find(clean)
+    val match1 = phoneWithContextRegex.find(text)
     if (match1 != null) {
-      val nameCandidate = match1.groupValues[1].takeIf { it.isNotBlank() }
+      val nameCandidate = match1.groupValues[1].trim().takeIf { it.isNotBlank() }
       val phoneCandidate = normalizePhone(match1.groupValues[2])
       return Pair(phoneCandidate, nameCandidate)
     }
 
-    // Pattern with name followed by phone: "Yemane (0939383425)" or "Abebe (0911223344)"
-    val namePhoneRegex = Regex("""([A-Za-z\u1200-\u137F]{3,20})\s*\(\s*(\+?2519\d{8}|09\d{8})\s*\)""")
-    val match2 = namePhoneRegex.find(clean)
+    // 2. Pattern: "credited party: 0939383425" or "to: 0939383425" or "ወደ: 0939383425"
+    val toPhoneOnlyRegex = Regex(
+      """(?:to|ወደ|ተቀባይ|credited\s*party|credited\s*to|beneficiary)[:\s]+(\+?2519\d{8}|09\d{8})""",
+      RegexOption.IGNORE_CASE
+    )
+    val matchToPhone = toPhoneOnlyRegex.find(text)
+    if (matchToPhone != null) {
+      val phone = normalizePhone(matchToPhone.groupValues[1])
+      val name = if (text.contains(TelebirrConfig.MERCHANT_NAME, ignoreCase = true) || text.contains("የማነ")) {
+        TelebirrConfig.MERCHANT_NAME
+      } else null
+      return Pair(phone, name)
+    }
+
+    // 3. Pattern with name followed by phone: "Yemane (0939383425)" or "Abebe (0911223344)"
+    val namePhoneRegex = Regex("""([A-Za-z\u1200-\u137F\s]{3,30})\s*\(\s*(\+?2519\d{8}|09\d{8})\s*\)""")
+    val match2 = namePhoneRegex.find(text)
     if (match2 != null) {
       val name = match2.groupValues[1].trim()
       val phone = normalizePhone(match2.groupValues[2])
       return Pair(phone, name)
     }
 
-    // Pattern: "ወደ 0939383425" or "to 0939383425"
-    val toPhoneRegex = Regex("""(?:to|ወደ|ተቀባይ)[:\s]+(\+?2519\d{8}|09\d{8})""", RegexOption.IGNORE_CASE)
-    val match3 = toPhoneRegex.find(clean)
-    if (match3 != null) {
-      val phone = normalizePhone(match3.groupValues[1])
-      val name = if (clean.contains(TelebirrConfig.MERCHANT_NAME, ignoreCase = true)) TelebirrConfig.MERCHANT_NAME else null
-      return Pair(phone, name)
-    }
+    // 4. Check if merchant account explicitly appears anywhere in text
+    val phoneFound = if (text.contains("0939383425") || text.contains("251939383425")) "0939383425" else null
+    val nameFound = if (text.contains(TelebirrConfig.MERCHANT_NAME, ignoreCase = true) || text.contains("የማነ")) {
+      TelebirrConfig.MERCHANT_NAME
+    } else null
 
-    // Fallback: check if merchant name or merchant phone exists in the text
-    val phoneFound = if (clean.contains("0939383425") || clean.contains("251939383425")) "0939383425" else null
-    val nameFound = if (clean.contains(TelebirrConfig.MERCHANT_NAME, ignoreCase = true)) TelebirrConfig.MERCHANT_NAME else null
-
-    // Check if another Ethiopian mobile phone appears in the message that isn't merchant phone
+    // 5. Check if another Ethiopian mobile phone appears in the message that isn't merchant phone
     val anyPhoneRegex = Regex("""(\+?2519\d{8}|09\d{8})""")
-    val otherPhone = anyPhoneRegex.findAll(clean)
-      .mapNotNull { normalizePhone(it.value) }
-      .firstOrNull { it != TelebirrConfig.MERCHANT_ACCOUNT }
+    val phones = anyPhoneRegex.findAll(text).mapNotNull { normalizePhone(it.value) }.toList()
+    val otherPhone = phones.firstOrNull { it != TelebirrConfig.MERCHANT_ACCOUNT }
 
     return Pair(phoneFound ?: otherPhone, nameFound)
   }
@@ -170,18 +183,8 @@ object TelebirrSecurity {
    * Validates whether the recipient in the SMS or receipt text matches the account holder (Yemane / 0939383425).
    */
   fun validateRecipient(rawInput: String): RecipientAuditResult {
-    val (phone, name) = extractReceiverDetails(rawInput)
-
-    // If input is purely a short transaction ID or pure receipt link, no recipient string is in text yet
     val clean = rawInput.trim()
-    val isShortCodeOrUrlOnly = clean.length <= 16 || clean.startsWith("http", ignoreCase = true)
-    if (isShortCodeOrUrlOnly && phone == null && name == null) {
-      return RecipientAuditResult(
-        isMatched = true,
-        detectedPhone = null,
-        detectedName = null
-      )
-    }
+    val (phone, name) = extractReceiverDetails(clean)
 
     val expectedPhone = TelebirrConfig.MERCHANT_ACCOUNT
     val expectedName = TelebirrConfig.MERCHANT_NAME.lowercase(Locale.ROOT)
@@ -189,65 +192,92 @@ object TelebirrSecurity {
     // If an explicit phone is detected:
     if (phone != null) {
       if (phone != expectedPhone) {
-        val nameDesc = if (name != null) " ($name)" else ""
+        val nameDesc = if (!name.isNullOrBlank()) " ($name)" else ""
         return RecipientAuditResult(
           isMatched = false,
           detectedPhone = phone,
           detectedName = name,
-          failureReason = "Receipt rejected: Funds were transferred to $phone$nameDesc instead of account holder ${TelebirrConfig.MERCHANT_NAME} ($expectedPhone)."
+          failureReason = "Declined: Receipt shows payment transferred to account $phone$nameDesc, not to official account holder ${TelebirrConfig.MERCHANT_NAME} ($expectedPhone)."
         )
       }
     }
 
     // If an explicit recipient name is detected:
-    if (name != null) {
+    if (!name.isNullOrBlank()) {
       val lowerName = name.lowercase(Locale.ROOT)
-      if (!lowerName.contains(expectedName)) {
-        // Name differs from Yemane
+      if (!lowerName.contains(expectedName) && !lowerName.contains("የማነ")) {
         val phoneDesc = if (phone != null) " ($phone)" else ""
         return RecipientAuditResult(
           isMatched = false,
           detectedPhone = phone,
           detectedName = name,
-          failureReason = "Receipt rejected: Funds were transferred to $name$phoneDesc instead of account holder ${TelebirrConfig.MERCHANT_NAME} ($expectedPhone)."
+          failureReason = "Declined: Receipt shows payment transferred to $name$phoneDesc, not to official account holder ${TelebirrConfig.MERCHANT_NAME} ($expectedPhone)."
         )
       }
     }
 
+    val matched = (phone == expectedPhone) ||
+      (name != null && (name.lowercase(Locale.ROOT).contains(expectedName) || name.contains("የማነ"))) ||
+      clean.contains(expectedPhone) ||
+      clean.contains(TelebirrConfig.MERCHANT_NAME, ignoreCase = true) ||
+      clean.contains("የማነ")
+
     return RecipientAuditResult(
-      isMatched = true,
-      detectedPhone = phone ?: expectedPhone,
-      detectedName = name ?: TelebirrConfig.MERCHANT_NAME
+      isMatched = matched,
+      detectedPhone = phone ?: if (matched) expectedPhone else null,
+      detectedName = name ?: if (matched) TelebirrConfig.MERCHANT_NAME else null,
+      failureReason = if (!matched) {
+        "Declined: Could not verify that payment was transferred to official merchant account ${TelebirrConfig.MERCHANT_NAME} ($expectedPhone)."
+      } else null
     )
   }
 
   /**
-   * Extracts paid amount in Birr from SMS or receipt text:
-   * e.g. "60.00 ETB", "60 ETB", "ብር 60.00", "Amount: 90", "30 Birr"
+   * Extracts paid amount in Birr from SMS, receipt text, or HTML:
+   * e.g. "60.00 ETB", "60 ETB", "ETB 60.00", "ብር 60.00", "Amount: 90", "30 Birr"
    */
   fun extractAmount(rawInput: String): Int? {
     val clean = rawInput.trim()
     if (clean.isEmpty()) return null
 
-    // Pattern: "ብር 60.00" or "ብር 60"
+    // 1. Pattern: "ብር 60.00" or "ብር 60"
     val amharicBirrRegex = Regex("""(?:ብር|birr)\s*([0-9]+(?:\.[0-9]+)?)""", RegexOption.IGNORE_CASE)
     val matchAm = amharicBirrRegex.find(clean)
     if (matchAm != null) {
-      return matchAm.groupValues[1].toDoubleOrNull()?.toInt()
+      val v = matchAm.groupValues[1].toDoubleOrNull()?.toInt()
+      if (v != null && v > 0) return v
     }
 
-    // Pattern: "60.00 ETB" or "60.00 Birr" or "60 ETB"
-    val birrAfterRegex = Regex("""([0-9]+(?:\.[0-9]+)?)\s*(?:etb|birr)""", RegexOption.IGNORE_CASE)
+    // 2. Pattern: "60.00 ETB" or "60.00 Birr" or "60 ETB" or "60 ብር"
+    val birrAfterRegex = Regex("""([0-9]+(?:\.[0-9]+)?)\s*(?:etb|birr|ብር)""", RegexOption.IGNORE_CASE)
     val matchAfter = birrAfterRegex.find(clean)
     if (matchAfter != null) {
-      return matchAfter.groupValues[1].toDoubleOrNull()?.toInt()
+      val v = matchAfter.groupValues[1].toDoubleOrNull()?.toInt()
+      if (v != null && v > 0) return v
     }
 
-    // Pattern: "amount: 60.00" or "amount : 60"
-    val amountRegex = Regex("""(?:amount|መጠን)[:\s]+([0-9]+(?:\.[0-9]+)?)""", RegexOption.IGNORE_CASE)
+    // 3. Pattern: "ETB 60.00" or "ETB 60"
+    val etbBeforeRegex = Regex("""(?:etb)\s*([0-9]+(?:\.[0-9]+)?)""", RegexOption.IGNORE_CASE)
+    val matchBefore = etbBeforeRegex.find(clean)
+    if (matchBefore != null) {
+      val v = matchBefore.groupValues[1].toDoubleOrNull()?.toInt()
+      if (v != null && v > 0) return v
+    }
+
+    // 4. Pattern: "amount: 60.00" or "amount : 60" or "መጠን: 60"
+    val amountRegex = Regex("""(?:amount|መጠን|total)[:\s]+([0-9]+(?:\.[0-9]+)?)""", RegexOption.IGNORE_CASE)
     val matchAmt = amountRegex.find(clean)
     if (matchAmt != null) {
-      return matchAmt.groupValues[1].toDoubleOrNull()?.toInt()
+      val v = matchAmt.groupValues[1].toDoubleOrNull()?.toInt()
+      if (v != null && v > 0) return v
+    }
+
+    // 5. Pattern: JSON/HTML attribute e.g. "amount": 60 or "amount": "60.00"
+    val jsonRegex = Regex(""""amount"\s*:\s*"?([0-9]+(?:\.[0-9]+)?)"?""", RegexOption.IGNORE_CASE)
+    val matchJson = jsonRegex.find(clean)
+    if (matchJson != null) {
+      val v = matchJson.groupValues[1].toDoubleOrNull()?.toInt()
+      if (v != null && v > 0) return v
     }
 
     return null
@@ -320,7 +350,7 @@ object TelebirrSecurity {
       amountBirr = amount,
       isStatusSuccess = isSuccess,
       statusText = if (isSuccess) "Completed" else "Unknown",
-      failureReason = if (!isSuccess) "Transaction has not been marked as completed." else null
+      failureReason = if (!isSuccess) "Transaction has not been marked as completed by Ethio Telecom." else null
     )
   }
 

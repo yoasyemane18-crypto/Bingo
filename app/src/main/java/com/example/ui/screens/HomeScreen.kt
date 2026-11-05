@@ -235,7 +235,7 @@ fun HomeScreen(
 
           Text(
             text = when (language) {
-              AppLanguage.EN -> "⇥ Login"
+              AppLanguage.EN -> "⇥ Sign In"
               AppLanguage.AM -> "⇥ ግባ"
               AppLanguage.TI -> "⇥ እቶ"
             },
@@ -309,7 +309,7 @@ fun HomeScreen(
 
           LuxuryButton(
             text = when (language) {
-              AppLanguage.EN -> "⇥ Login"
+              AppLanguage.EN -> "⇥ Sign In"
               AppLanguage.AM -> "⇥ ግባ"
               AppLanguage.TI -> "⇥ እቶ"
             },

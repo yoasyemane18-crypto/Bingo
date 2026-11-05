@@ -276,21 +276,45 @@ fun YemeDrawer(
           .weight(1f)
           .padding(vertical = 8.dp)
       ) {
-        val navItems = mutableListOf<Pair<Screen, String>>()
-        navItems.add(Pair(Screen.HOME, "⌂ Home"))
-        if (username == null) {
-          navItems.add(Pair(Screen.REGISTER, "✚ Register"))
-        }
-        navItems.add(Pair(Screen.PLAY_LOBBY, "▶ Play / Lobby"))
-        navItems.add(Pair(Screen.SCHEDULE, "☰ Schedule"))
-        navItems.add(Pair(Screen.HOW_TO_PLAY, "ⓘ How to Play"))
-        navItems.add(Pair(Screen.ABOUT_US, "● About Us"))
-        navItems.add(Pair(Screen.CONTACT_US, "✉ Contact Us"))
-        navItems.add(Pair(Screen.FAQS, "? FAQs"))
-        navItems.add(Pair(Screen.ADMIN, "⚙ Admin"))
+        data class DrawerNavEntry(
+          val screen: Screen?,
+          val label: String,
+          val isSignOut: Boolean = false,
+          val onClick: (() -> Unit)? = null
+        )
 
-        navItems.forEach { (screen, label) ->
-          val isSelected = currentScreen == screen
+        val navItems = mutableListOf<DrawerNavEntry>()
+        navItems.add(DrawerNavEntry(Screen.HOME, "⌂ Home"))
+
+        if (username == null) {
+          navItems.add(DrawerNavEntry(Screen.REGISTER, "✚ Register"))
+          val signInLabel = when (currentLanguage) {
+            AppLanguage.EN -> "⇥ Sign In"
+            AppLanguage.AM -> "⇥ ግባ"
+            AppLanguage.TI -> "⇥ እቶ"
+          }
+          navItems.add(DrawerNavEntry(Screen.SIGN_IN, signInLabel))
+        } else {
+          val signOutLabel = when (currentLanguage) {
+            AppLanguage.EN -> "⇤ Sign Out"
+            AppLanguage.AM -> "⇤ ውጣ"
+            AppLanguage.TI -> "⇤ ውጻእ"
+          }
+          navItems.add(DrawerNavEntry(null, signOutLabel, isSignOut = true) {
+            onLogout()
+            onClose()
+          })
+        }
+
+        navItems.add(DrawerNavEntry(Screen.SCHEDULE, "☰ Schedule"))
+        navItems.add(DrawerNavEntry(Screen.HOW_TO_PLAY, "ⓘ How to Play"))
+        navItems.add(DrawerNavEntry(Screen.ABOUT_US, "● About Us"))
+        navItems.add(DrawerNavEntry(Screen.CONTACT_US, "✉ Contact Us"))
+        navItems.add(DrawerNavEntry(Screen.FAQS, "? FAQs"))
+        navItems.add(DrawerNavEntry(Screen.ADMIN, "⚙ Admin"))
+
+        navItems.forEach { entry ->
+          val isSelected = entry.screen != null && currentScreen == entry.screen
           val itemBg = if (isSelected) {
             Brush.horizontalGradient(listOf(BingoGold, BingoGoldDark))
           } else {
@@ -302,36 +326,24 @@ fun YemeDrawer(
               .fillMaxWidth()
               .background(itemBg)
               .clickable {
-                onNavigate(screen)
-                onClose()
+                if (entry.onClick != null) {
+                  entry.onClick.invoke()
+                } else if (entry.screen != null) {
+                  onNavigate(entry.screen)
+                  onClose()
+                }
               }
               .padding(horizontal = 16.dp, vertical = 13.dp)
           ) {
             Text(
-              text = label,
+              text = entry.label,
               fontSize = 16.sp,
-              fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-              color = if (isSelected) BingoTextDark else BingoTextWhite
-            )
-          }
-        }
-
-        if (username != null) {
-          Spacer(modifier = Modifier.height(8.dp))
-          Box(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clickable {
-                onLogout()
-                onClose()
+              fontWeight = if (isSelected || entry.isSignOut) FontWeight.Bold else FontWeight.Medium,
+              color = when {
+                isSelected -> BingoTextDark
+                entry.isSignOut -> BingoCoral
+                else -> BingoTextWhite
               }
-              .padding(horizontal = 16.dp, vertical = 13.dp)
-          ) {
-            Text(
-              text = "⇤ Sign Out",
-              fontSize = 16.sp,
-              fontWeight = FontWeight.Bold,
-              color = BingoCoral
             )
           }
         }
@@ -525,6 +537,8 @@ fun WinnerCelebrationDialog(
   winnerCardNum: Int,
   callCount: Int,
   rewardBirr: Int?,
+  roundNumber: Int = 1,
+  totalRounds: Int = 3,
   onDismiss: () -> Unit
 ) {
   Dialog(onDismissRequest = onDismiss) {
@@ -552,7 +566,16 @@ fun WinnerCelebrationDialog(
           letterSpacing = 2.sp
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+          text = "Round $roundNumber of $totalRounds",
+          fontWeight = FontWeight.SemiBold,
+          fontSize = 14.sp,
+          color = BingoGoldLight
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         Text(
           text = "🏆 Card #$winnerCardNum won in $callCount calls!",
@@ -582,10 +605,98 @@ fun WinnerCelebrationDialog(
         Spacer(modifier = Modifier.height(20.dp))
 
         LuxuryButton(
-          text = "Back to Lobby",
+          text = if (roundNumber < totalRounds) "Next Game ($roundNumber of $totalRounds)" else "Complete Session",
           onClick = onDismiss,
           isGold = true,
           testTag = "dialog_back_button"
+        )
+      }
+    }
+  }
+}
+
+@Composable
+fun SessionSummaryCelebrationDialog(
+  slotLabel: String,
+  totalWinningsBirr: Int,
+  language: AppLanguage,
+  onDismiss: () -> Unit
+) {
+  Dialog(onDismissRequest = onDismiss) {
+    Card(
+      shape = RoundedCornerShape(24.dp),
+      colors = CardDefaults.cardColors(containerColor = BingoCardBg),
+      border = androidx.compose.foundation.BorderStroke(2.dp, BingoGold),
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(16.dp)
+        .testTag("session_summary_dialog")
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+      ) {
+        Text(
+          text = "🎉 3 GAMES COMPLETE!",
+          fontFamily = PlayfairFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = 24.sp,
+          color = BingoGold,
+          textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Text(
+          text = when (language) {
+            AppLanguage.EN -> "You have played all 3 consecutive games for this playing time."
+            AppLanguage.AM -> "ለዚህ የጨዋታ ሰዓት 3ቱንም ተከታታይ ጨዋታዎች አጠናቀዋል።"
+            AppLanguage.TI -> "ነዚ ናይ ጸወታ ሰዓት 3ቲኦም ተኸታተልቲ ጸወታታት ዛዚምኩም።"
+          },
+          fontSize = 15.sp,
+          color = BingoTextWhite,
+          textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = BingoPurpleDeep,
+          border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold)
+        ) {
+          Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+          ) {
+            Text(
+              text = "Total Won: $totalWinningsBirr Birr",
+              fontWeight = FontWeight.Bold,
+              fontSize = 18.sp,
+              color = BingoGoldLight
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+              text = "Playing Time: $slotLabel",
+              fontSize = 13.sp,
+              color = BingoTextMuted
+            )
+          }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        LuxuryButton(
+          text = when (language) {
+            AppLanguage.EN -> "Back to Lobby"
+            AppLanguage.AM -> "ወደ መቀበያው ተመለስ"
+            AppLanguage.TI -> "ናብ መእተዊ ተመለስ"
+          },
+          onClick = onDismiss,
+          isGold = true,
+          testTag = "summary_back_to_lobby_button"
         )
       }
     }

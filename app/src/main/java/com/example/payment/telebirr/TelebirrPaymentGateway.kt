@@ -74,7 +74,7 @@ class TelebirrPaymentGateway(
         verifiedAmountBirr = 0,
         payerPhone = null,
         isInvalidReceipt = true,
-        message = "Invalid Telebirr receipt format. Please enter a valid transaction ID (e.g., CL240899128) or the official receipt link."
+        message = "Declined: Invalid Telebirr receipt format. Please enter a valid transaction ID (e.g., CL240899128) or official receipt link."
       )
     }
 
@@ -87,41 +87,70 @@ class TelebirrPaymentGateway(
         payerPhone = null,
         isDuplicate = true,
         isFraudSuspected = true,
-        message = "Duplicate transaction: Receipt $transactionId has already been redeemed in this system and cannot be reused."
+        message = "Declined: Duplicate transaction! Receipt $transactionId has already been redeemed and cannot be reused."
       )
     }
 
-    // 3. Receiver Verification: Check if input SMS specifies recipient
+    // 3. Minimum amount validation
+    if (expectedAmountBirr < TelebirrConfig.MIN_PAYMENT_BIRR) {
+      return@withContext TelebirrVerificationResponse(
+        isSuccess = false,
+        transactionId = transactionId,
+        verifiedAmountBirr = expectedAmountBirr,
+        message = "Declined: Payment of $expectedAmountBirr Birr is below the minimum required ${TelebirrConfig.MIN_PAYMENT_BIRR} Birr (30 Birr per cartela)."
+      )
+    }
+
+    // 4. Strict input text verification (Receiver Account, Account Holder, and Amount)
     val recipientAudit = TelebirrSecurity.validateRecipient(cleanInput)
-    if (!recipientAudit.isMatched) {
+    val (textPhone, textName) = TelebirrSecurity.extractReceiverDetails(cleanInput)
+    val textAmount = TelebirrSecurity.extractAmount(cleanInput)
+
+    // Check receiver phone in input text
+    if (textPhone != null && textPhone != TelebirrConfig.MERCHANT_ACCOUNT) {
       return@withContext TelebirrVerificationResponse(
         isSuccess = false,
         transactionId = transactionId,
         verifiedAmountBirr = 0,
         payerPhone = null,
-        receiverName = recipientAudit.detectedName ?: "Unknown",
-        receiverAccount = recipientAudit.detectedPhone ?: "Unknown",
+        receiverName = textName ?: "Unknown",
+        receiverAccount = textPhone,
         isWrongReceiver = true,
         isFraudSuspected = true,
-        message = recipientAudit.failureReason ?: "Verification failed: Transferred to a different recipient, not to account holder Yemane (0939383425)."
+        message = "Declined: Receipt shows payment transferred to account $textPhone, not to merchant account ${TelebirrConfig.MERCHANT_ACCOUNT} (${TelebirrConfig.MERCHANT_NAME})."
       )
     }
 
-    // 4. Amount validation (minimum 30 Birr)
-    val parsedAmount = TelebirrSecurity.extractAmount(cleanInput)
-    val effectiveAmount = parsedAmount ?: expectedAmountBirr
-    if (effectiveAmount < TelebirrConfig.MIN_PAYMENT_BIRR) {
+    // Check receiver name in input text
+    if (textName != null && !textName.contains(TelebirrConfig.MERCHANT_NAME, ignoreCase = true) && !textName.contains("የማነ")) {
       return@withContext TelebirrVerificationResponse(
         isSuccess = false,
         transactionId = transactionId,
-        verifiedAmountBirr = effectiveAmount,
+        verifiedAmountBirr = 0,
         payerPhone = null,
-        message = "Payment of $effectiveAmount Birr is below the minimum required ${TelebirrConfig.MIN_PAYMENT_BIRR} Birr (30 Birr per cartela)."
+        receiverName = textName,
+        receiverAccount = textPhone ?: "Unknown",
+        isWrongReceiver = true,
+        isFraudSuspected = true,
+        message = "Declined: Receipt shows payment transferred to account holder $textName, not to ${TelebirrConfig.MERCHANT_NAME} (${TelebirrConfig.MERCHANT_ACCOUNT})."
+      )
+    }
+
+    // Check amount in input text against the amount the user typed
+    if (textAmount != null && textAmount != expectedAmountBirr) {
+      return@withContext TelebirrVerificationResponse(
+        isSuccess = false,
+        transactionId = transactionId,
+        verifiedAmountBirr = textAmount,
+        isAmountMismatch = true,
+        message = "Declined: Amount mismatch! You entered $expectedAmountBirr Birr, but the receipt shows $textAmount Birr."
       )
     }
 
     // 5. Online Verification against Ethio Telecom Electronic Receipt Portal
     var onlineVerified = false
+    var finalVerifiedAmount = textAmount ?: expectedAmountBirr
+
     try {
       val receiptUrl = "${TelebirrConfig.ETHIO_TELECOM_RECEIPT_BASE_URL}$transactionId"
       val request = Request.Builder()
@@ -140,11 +169,11 @@ class TelebirrPaymentGateway(
             transactionId = transactionId,
             verifiedAmountBirr = 0,
             isInvalidReceipt = true,
-            message = onlineData.failureReason ?: "Receipt $transactionId was not found in Ethio Telecom records."
+            message = "Declined: ${onlineData.failureReason ?: "Receipt $transactionId was not found in Ethio Telecom records."}"
           )
         }
 
-        // Online receiver verification:
+        // Online account number check
         if (onlineData.creditedPartyPhone != null && onlineData.creditedPartyPhone != TelebirrConfig.MERCHANT_ACCOUNT) {
           return@withContext TelebirrVerificationResponse(
             isSuccess = false,
@@ -154,27 +183,103 @@ class TelebirrPaymentGateway(
             receiverName = onlineData.creditedPartyName ?: "Unknown",
             isWrongReceiver = true,
             isFraudSuspected = true,
-            message = "Verification failed: Receipt shows payment was credited to ${onlineData.creditedPartyPhone}, not account holder Yemane (${TelebirrConfig.MERCHANT_ACCOUNT})."
+            message = "Declined: Receipt shows funds credited to account ${onlineData.creditedPartyPhone}, not to official account ${TelebirrConfig.MERCHANT_ACCOUNT} (${TelebirrConfig.MERCHANT_NAME})."
+          )
+        }
+
+        // Online account holder name check
+        if (onlineData.creditedPartyName != null &&
+          !onlineData.creditedPartyName!!.contains(TelebirrConfig.MERCHANT_NAME, ignoreCase = true) &&
+          !onlineData.creditedPartyName!!.contains("የማነ")
+        ) {
+          return@withContext TelebirrVerificationResponse(
+            isSuccess = false,
+            transactionId = transactionId,
+            verifiedAmountBirr = 0,
+            receiverAccount = onlineData.creditedPartyPhone ?: TelebirrConfig.MERCHANT_ACCOUNT,
+            receiverName = onlineData.creditedPartyName ?: "Unknown",
+            isWrongReceiver = true,
+            isFraudSuspected = true,
+            message = "Declined: Receipt shows account holder is ${onlineData.creditedPartyName}, not ${TelebirrConfig.MERCHANT_NAME} (${TelebirrConfig.MERCHANT_ACCOUNT})."
+          )
+        }
+
+        // Online amount check against the amount the user typed
+        if (onlineData.amountBirr != null) {
+          if (onlineData.amountBirr != expectedAmountBirr) {
+            return@withContext TelebirrVerificationResponse(
+              isSuccess = false,
+              transactionId = transactionId,
+              verifiedAmountBirr = onlineData.amountBirr,
+              isAmountMismatch = true,
+              message = "Declined: Amount mismatch! You entered $expectedAmountBirr Birr, but the official Ethio Telecom receipt is for ${onlineData.amountBirr} Birr."
+            )
+          }
+          finalVerifiedAmount = onlineData.amountBirr
+        }
+
+        // Verify that the receipt confirms the official merchant account or holder
+        val confirmedReceiver = (onlineData.creditedPartyPhone == TelebirrConfig.MERCHANT_ACCOUNT) ||
+          (onlineData.creditedPartyName != null && (onlineData.creditedPartyName!!.contains(TelebirrConfig.MERCHANT_NAME, ignoreCase = true) || onlineData.creditedPartyName!!.contains("የማነ"))) ||
+          responseBody.contains(TelebirrConfig.MERCHANT_ACCOUNT) ||
+          responseBody.contains(TelebirrConfig.MERCHANT_NAME, ignoreCase = true) ||
+          responseBody.contains("የማነ")
+
+        if (!confirmedReceiver && textPhone == null && textName == null) {
+          return@withContext TelebirrVerificationResponse(
+            isSuccess = false,
+            transactionId = transactionId,
+            verifiedAmountBirr = 0,
+            isWrongReceiver = true,
+            message = "Declined: Cannot verify that payment was transferred to account holder ${TelebirrConfig.MERCHANT_NAME} (${TelebirrConfig.MERCHANT_ACCOUNT})."
           )
         }
 
         onlineVerified = true
       }
     } catch (_: Exception) {
-      // Network timeout or offline environment: fall back to validated cryptographic and SMS structural verification
+      // Network timeout or unreachable: verify against validated SMS details
     }
 
-    val finalAmount = parsedAmount ?: expectedAmountBirr
+    // 6. If online lookup did not connect, verify that recipient was confirmed in SMS
+    if (!onlineVerified) {
+      val confirmedInText = (textPhone == TelebirrConfig.MERCHANT_ACCOUNT) ||
+        (textName != null && (textName.contains(TelebirrConfig.MERCHANT_NAME, ignoreCase = true) || textName.contains("የማነ"))) ||
+        cleanInput.contains(TelebirrConfig.MERCHANT_ACCOUNT) ||
+        cleanInput.contains(TelebirrConfig.MERCHANT_NAME, ignoreCase = true) ||
+        cleanInput.contains("የማነ")
+
+      if (!confirmedInText) {
+        return@withContext TelebirrVerificationResponse(
+          isSuccess = false,
+          transactionId = transactionId,
+          verifiedAmountBirr = 0,
+          isWrongReceiver = true,
+          message = "Declined: Cannot confirm transfer to account holder ${TelebirrConfig.MERCHANT_NAME} (${TelebirrConfig.MERCHANT_ACCOUNT}). Please paste the full Telebirr SMS receipt."
+        )
+      }
+
+      if (textAmount != null && textAmount != expectedAmountBirr) {
+        return@withContext TelebirrVerificationResponse(
+          isSuccess = false,
+          transactionId = transactionId,
+          verifiedAmountBirr = textAmount,
+          isAmountMismatch = true,
+          message = "Declined: Amount mismatch! You entered $expectedAmountBirr Birr, but the receipt shows $textAmount Birr."
+        )
+      }
+    }
+
     val onlineNote = if (onlineVerified) " (Live Ethio Telecom verified)" else ""
 
     TelebirrVerificationResponse(
       isSuccess = true,
       transactionId = transactionId,
-      verifiedAmountBirr = finalAmount,
+      verifiedAmountBirr = finalVerifiedAmount,
       payerPhone = null,
       receiverName = TelebirrConfig.MERCHANT_NAME,
       receiverAccount = TelebirrConfig.MERCHANT_ACCOUNT,
-      message = "✔ Telebirr payment of $finalAmount Birr to ${TelebirrConfig.MERCHANT_NAME} (0939383425) verified successfully$onlineNote."
+      message = "✔ Telebirr payment of $finalVerifiedAmount Birr to ${TelebirrConfig.MERCHANT_NAME} (${TelebirrConfig.MERCHANT_ACCOUNT}) verified successfully$onlineNote."
     )
   }
 

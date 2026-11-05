@@ -32,7 +32,8 @@ data class TelebirrVerificationResponse(
   val isFraudSuspected: Boolean = false,
   val isDuplicate: Boolean = false,
   val isWrongReceiver: Boolean = false,
-  val isInvalidReceipt: Boolean = false
+  val isInvalidReceipt: Boolean = false,
+  val isAmountMismatch: Boolean = false
 )
 
 sealed interface GatewayUiState {

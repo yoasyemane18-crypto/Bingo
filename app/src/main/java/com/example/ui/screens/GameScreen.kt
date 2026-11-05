@@ -60,6 +60,7 @@ import com.example.model.BingoCard
 import com.example.model.BingoGoal
 import com.example.model.StringsDictionary
 import com.example.ui.components.ConfettiOverlay
+import com.example.ui.components.SessionSummaryCelebrationDialog
 import com.example.ui.components.WinnerCelebrationDialog
 import com.example.ui.theme.BingoBorderLight
 import com.example.ui.theme.BingoBorderPurple
@@ -70,6 +71,7 @@ import com.example.ui.theme.BingoGold
 import com.example.ui.theme.BingoGoldDark
 import com.example.ui.theme.BingoGoldLight
 import com.example.ui.theme.BingoGreen
+import com.example.ui.theme.BingoGreenLight
 import com.example.ui.theme.BingoNight
 import com.example.ui.theme.BingoPurple
 import com.example.ui.theme.BingoPurpleDeep
@@ -106,6 +108,12 @@ fun GameScreen(
   showConfetti: Boolean,
   winnerCardNum: Int?,
   winnerCallsCount: Int?,
+  currentRoundNumber: Int = 1,
+  totalSessionRounds: Int = 3,
+  isIntermission: Boolean = false,
+  intermissionSecondsLeft: Int = 0,
+  sessionSummaryDialog: Boolean = false,
+  sessionTotalWonBirr: Int = 0,
   onCardTabSelected: (Int) -> Unit,
   onCellTapped: (cardIndex: Int, col: Int, row: Int) -> Unit,
   onClaimBingo: () -> Unit,
@@ -114,6 +122,8 @@ fun GameScreen(
   onToggleVoiceLang: () -> Unit,
   onBack: () -> Unit,
   onDismissWinDialog: () -> Unit,
+  onSkipIntermission: () -> Unit = {},
+  onDismissSessionSummary: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val currentCard = activeCards.getOrNull(activeCardIndex) ?: activeCards.firstOrNull()
@@ -187,24 +197,34 @@ fun GameScreen(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
       ) {
-        Text(
-          text = if (activeRound != null) {
-            when (language) {
-              AppLanguage.EN -> "Game ${activeRound.roundNumber} of 3"
-              AppLanguage.AM -> "ጨዋታ ${activeRound.roundNumber} ከ 3"
-              AppLanguage.TI -> "ጸወታ ${activeRound.roundNumber} ካብ 3"
-            }
-          } else {
-            when (language) {
-              AppLanguage.EN -> "Practice Game"
-              AppLanguage.AM -> "የልምምድ ጨዋታ"
-              AppLanguage.TI -> "ናይ ልምምድ ጸወታ"
-            }
-          },
-          color = BingoGoldLight,
-          fontWeight = FontWeight.SemiBold,
-          fontSize = 14.sp
-        )
+        Column {
+          Text(
+            text = if (activeRound != null) {
+              when (language) {
+                AppLanguage.EN -> "Game $currentRoundNumber of $totalSessionRounds"
+                AppLanguage.AM -> "ጨዋታ $currentRoundNumber ከ $totalSessionRounds"
+                AppLanguage.TI -> "ጸወታ $currentRoundNumber ካብ $totalSessionRounds"
+              }
+            } else {
+              when (language) {
+                AppLanguage.EN -> "Practice Game ($currentRoundNumber of $totalSessionRounds)"
+                AppLanguage.AM -> "የልምምድ ጨዋታ ($currentRoundNumber ከ $totalSessionRounds)"
+                AppLanguage.TI -> "ናይ ልምምድ ጸወታ ($currentRoundNumber ካብ $totalSessionRounds)"
+              }
+            },
+            color = BingoGoldLight,
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp
+          )
+          if (sessionTotalWonBirr > 0) {
+            Text(
+              text = "Total Won: $sessionTotalWonBirr birr",
+              color = BingoGreenLight,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = 12.sp
+            )
+          }
+        }
 
         if (rewardBirr != null && rewardBirr > 0) {
           Text(
@@ -612,10 +632,107 @@ fun GameScreen(
         winnerCardNum = winnerCardNum,
         callCount = winnerCallsCount ?: calledNumbers.size,
         rewardBirr = rewardBirr,
+        roundNumber = currentRoundNumber,
+        totalRounds = totalSessionRounds,
         onDismiss = {
           onDismissWinDialog()
-          onBack()
         }
+      )
+    }
+
+    // Intermission Overlay between consecutive rounds
+    AnimatedVisibility(
+      visible = isIntermission,
+      enter = fadeIn() + scaleIn(),
+      exit = fadeOut()
+    ) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .background(BingoNight.copy(alpha = 0.94f))
+          .padding(24.dp),
+        contentAlignment = Alignment.Center
+      ) {
+        Card(
+          shape = RoundedCornerShape(24.dp),
+          colors = CardDefaults.cardColors(containerColor = BingoCardBg),
+          border = androidx.compose.foundation.BorderStroke(2.dp, BingoGold),
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("intermission_banner_card")
+        ) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+          ) {
+            Text(
+              text = "🏁 GAME ${currentRoundNumber - 1} OF $totalSessionRounds COMPLETED",
+              fontFamily = PlayfairFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 20.sp,
+              color = BingoGoldLight,
+              textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+              text = when (language) {
+                AppLanguage.EN -> "Next Game $currentRoundNumber of $totalSessionRounds starts in"
+                AppLanguage.AM -> "ቀጣዩ ጨዋታ $currentRoundNumber ከ $totalSessionRounds የሚጀምረው በ"
+                AppLanguage.TI -> "ቀጻሊ ጸወታ $currentRoundNumber ካብ $totalSessionRounds ዝጅምር ብ"
+              },
+              fontSize = 15.sp,
+              color = BingoTextWhite,
+              textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+              text = "$intermissionSecondsLeft s",
+              fontFamily = PlayfairFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 48.sp,
+              color = BingoGold
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            Button(
+              onClick = onSkipIntermission,
+              shape = RoundedCornerShape(50.dp),
+              colors = ButtonDefaults.buttonColors(containerColor = BingoGold),
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("skip_intermission_button")
+            ) {
+              Text(
+                text = when (language) {
+                  AppLanguage.EN -> "▶ Start Game $currentRoundNumber Now"
+                  AppLanguage.AM -> "▶ ጨዋታ $currentRoundNumber አሁኑኑ ጀምር"
+                  AppLanguage.TI -> "▶ ጸወታ $currentRoundNumber ሕጂ ጀምር"
+                },
+                color = BingoTextDark,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+              )
+            }
+          }
+        }
+      }
+    }
+
+    // Session Summary Dialog (after all 3 rounds are completed)
+    if (sessionSummaryDialog) {
+      SessionSummaryCelebrationDialog(
+        slotLabel = activeRound?.slotLabel ?: "",
+        totalWinningsBirr = sessionTotalWonBirr,
+        language = language,
+        onDismiss = onDismissSessionSummary
       )
     }
   }

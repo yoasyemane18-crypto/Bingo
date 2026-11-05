@@ -13,8 +13,14 @@ import com.example.model.UserProfile
 import com.example.model.WalletTransaction
 import com.example.model.WithdrawalRequest
 import com.example.model.WinnerRecord
+import com.example.data.remote.FirebaseRtdbService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.security.MessageDigest
 import java.util.Calendar
 import java.util.TimeZone
@@ -22,8 +28,21 @@ import java.util.UUID
 
 class BingoRepository(context: Context) {
 
+  private val appContext: Context = context.applicationContext
   private val prefs: SharedPreferences =
     context.getSharedPreferences("yeme_bingo_prefs", Context.MODE_PRIVATE)
+  private val usersBackupFile: File by lazy { File(appContext.filesDir, "yeme_bingo_users_backup.json") }
+
+  val remoteService = FirebaseRtdbService()
+  private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+  init {
+    ioScope.launch {
+      try {
+        syncWithRemoteServer()
+      } catch (_: Exception) {}
+    }
+  }
 
   companion object {
     const val PAY_BIRR = 30
@@ -61,8 +80,146 @@ class BingoRepository(context: Context) {
 
   // --- Users & Wallet ---
 
+  private fun readBackupFile(): JSONObject {
+    return try {
+      if (!usersBackupFile.exists()) {
+        JSONObject()
+      } else {
+        val text = usersBackupFile.readText()
+        if (text.isBlank()) JSONObject() else JSONObject(text)
+      }
+    } catch (_: Exception) {
+      JSONObject()
+    }
+  }
+
+  private fun writeBackupFile(obj: JSONObject) {
+    try {
+      val parent = usersBackupFile.parentFile
+      if (parent != null && !parent.exists()) {
+        parent.mkdirs()
+      }
+      usersBackupFile.writeText(obj.toString())
+    } catch (_: Exception) {
+    }
+  }
+
+  fun syncWithRemoteServer() {
+    try {
+      // 1. Pull all remote users from Firebase RTDB and cache locally
+      val remoteUsers = remoteService.fetchAllUsers()
+      if (remoteUsers.isNotEmpty()) {
+        val currentNames = getAllUsernamesInternal().toMutableSet()
+        remoteUsers.forEach { (name, user) ->
+          saveUserLocalOnly(user)
+          currentNames.add(name)
+        }
+        saveAllUsernames(currentNames)
+      }
+
+      // 2. Fetch and merge payment requests
+      val remotePays = remoteService.fetchPaymentRequests()
+      if (remotePays.isNotEmpty()) {
+        val localPays = getPaymentRequests().toMutableList()
+        val localIds = localPays.map { it.id }.toSet()
+        remotePays.forEach { p ->
+          if (!localIds.contains(p.id)) {
+            localPays.add(p)
+          }
+        }
+        val arr = JSONArray()
+        localPays.forEach { p ->
+          val o = JSONObject()
+          o.put("id", p.id)
+          o.put("u", p.username)
+          o.put("phone", p.phone)
+          o.put("amt", p.amountBirr)
+          o.put("rid", p.receiptId)
+          o.put("link", p.receiptLink)
+          o.put("ts", p.timestamp)
+          o.put("st", p.status.name)
+          arr.put(o)
+        }
+        prefs.edit().putString("all_payments", arr.toString()).apply()
+      }
+
+      // 3. Fetch and merge withdrawal requests
+      val remoteWds = remoteService.fetchWithdrawalRequests()
+      if (remoteWds.isNotEmpty()) {
+        val localWds = getWithdrawalRequests().toMutableList()
+        val localIds = localWds.map { it.id }.toSet()
+        remoteWds.forEach { w ->
+          if (!localIds.contains(w.id)) {
+            localWds.add(w)
+          }
+        }
+        val arr = JSONArray()
+        localWds.forEach { w ->
+          val o = JSONObject()
+          o.put("id", w.id)
+          o.put("u", w.username)
+          o.put("phone", w.phone)
+          o.put("amt", w.amountBirr)
+          o.put("acct", w.telebirrAccount)
+          o.put("ts", w.timestamp)
+          o.put("st", w.status.name)
+          arr.put(o)
+        }
+        prefs.edit().putString("all_withdrawals", arr.toString()).apply()
+      }
+
+      // 4. Fetch admin hash
+      val remoteAdmin = remoteService.fetchAdminHash()
+      if (!remoteAdmin.isNullOrBlank()) {
+        prefs.edit().putString("remote_admin_hash", remoteAdmin).apply()
+      }
+    } catch (_: Exception) {
+    }
+  }
+
+  fun fetchRemoteUserBlocking(username: String): UserProfile? {
+    return try {
+      val remote = remoteService.fetchUser(username)
+      if (remote != null) {
+        saveUserLocalOnly(remote)
+        val names = getAllUsernamesInternal().toMutableSet()
+        names.add(remote.username)
+        saveAllUsernames(names)
+      }
+      remote
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  fun getRemoteAdminHash(): String? {
+    return prefs.getString("remote_admin_hash", null)
+  }
+
   fun getUser(username: String): UserProfile? {
-    val raw = prefs.getString("user_$username", null) ?: return null
+    var raw = prefs.getString("user_$username", null)
+    if (raw.isNullOrBlank()) {
+      // Check internal disk backup file
+      synchronized(usersBackupFile) {
+        val backup = readBackupFile()
+        if (backup.has(username)) {
+          val backupObj = backup.optJSONObject(username)
+          if (backupObj != null) {
+            raw = backupObj.toString()
+            // Restore to SharedPreferences immediately
+            prefs.edit().putString("user_$username", raw).commit()
+          }
+        }
+      }
+    }
+    if (raw.isNullOrBlank()) {
+      // Async try pulling from remote
+      ioScope.launch {
+        fetchRemoteUserBlocking(username)
+      }
+      return null
+    }
+
     return try {
       val json = JSONObject(raw)
       val txList = mutableListOf<WalletTransaction>()
@@ -93,7 +250,7 @@ class BingoRepository(context: Context) {
       }
 
       UserProfile(
-        username = json.getString("name"),
+        username = json.optString("name", username),
         phone = json.optString("phone", ""),
         playingTime = json.optString("time", StringsDictionary.SLOTS.first().labelEn),
         passwordHash = json.optString("pw", ""),
@@ -106,7 +263,7 @@ class BingoRepository(context: Context) {
     }
   }
 
-  fun saveUser(user: UserProfile) {
+  fun saveUserLocalOnly(user: UserProfile) {
     try {
       val json = JSONObject()
       json.put("name", user.username)
@@ -116,7 +273,7 @@ class BingoRepository(context: Context) {
       json.put("wallet", user.walletBalance)
 
       val txArr = JSONArray()
-      user.transactions.takeLast(25).forEach { tx ->
+      user.transactions.takeLast(50).forEach { tx ->
         val t = JSONObject()
         t.put("id", tx.id)
         t.put("l", tx.label)
@@ -137,32 +294,150 @@ class BingoRepository(context: Context) {
       }
       json.put("cards", cardsObj)
 
-      prefs.edit().putString("user_${user.username}", json.toString()).apply()
+      // 1. Commit synchronously to SharedPreferences to prevent process termination data loss
+      prefs.edit().putString("user_${user.username}", json.toString()).commit()
 
-      // Also maintain all usernames list
-      val set = getAllUsernames().toMutableSet()
+      // 2. Synchronize username index in both JSON array and Set
+      val set = getAllUsernamesInternal().toMutableSet()
       set.add(user.username)
       saveAllUsernames(set)
+
+      // 3. Persist to internal physical backup file
+      synchronized(usersBackupFile) {
+        val backup = readBackupFile()
+        backup.put(user.username, json)
+        writeBackupFile(backup)
+      }
     } catch (_: Exception) {
     }
   }
 
-  fun deleteUser(username: String) {
-    prefs.edit().remove("user_$username").apply()
-    val set = getAllUsernames().toMutableSet()
+  fun saveUser(user: UserProfile) {
+    saveUserLocalOnly(user)
+    // Synchronize to real Firebase backend server asynchronously
+    ioScope.launch {
+      try {
+        remoteService.saveUser(user)
+      } catch (_: Exception) {}
+    }
+  }
+
+  fun deleteUserLocalOnly(username: String) {
+    prefs.edit().remove("user_$username").commit()
+    val set = getAllUsernamesInternal().toMutableSet()
     set.remove(username)
     saveAllUsernames(set)
+    synchronized(usersBackupFile) {
+      val backup = readBackupFile()
+      backup.remove(username)
+      writeBackupFile(backup)
+    }
     if (getCurrentSession() == username) {
       setCurrentSession(null)
     }
   }
 
+  fun deleteUser(username: String) {
+    deleteUserLocalOnly(username)
+    // Synchronize deletion to real Firebase backend server
+    ioScope.launch {
+      try {
+        remoteService.deleteUser(username)
+      } catch (_: Exception) {}
+    }
+  }
+
+  private fun getAllUsernamesInternal(): Set<String> {
+    val names = mutableSetOf<String>()
+
+    // 1. Read from all_usernames_json
+    val rawJson = prefs.getString("all_usernames_json", null)
+    if (!rawJson.isNullOrBlank()) {
+      try {
+        val arr = JSONArray(rawJson)
+        for (i in 0 until arr.length()) {
+          val n = arr.getString(i)
+          if (n.isNotBlank()) names.add(n)
+        }
+      } catch (_: Exception) {}
+    }
+
+    // 2. Read from legacy string set
+    prefs.getStringSet("all_usernames", null)?.let {
+      names.addAll(it)
+    }
+
+    // 3. Recover from all SharedPreferences keys
+    prefs.all.keys.forEach { k ->
+      if (k.startsWith("user_")) {
+        val n = k.removePrefix("user_")
+        if (n.isNotBlank()) names.add(n)
+      }
+    }
+
+    // 4. Recover from disk backup file
+    synchronized(usersBackupFile) {
+      val backup = readBackupFile()
+      val keys = backup.keys()
+      while (keys.hasNext()) {
+        val k = keys.next()
+        if (k.isNotBlank()) names.add(k)
+      }
+    }
+
+    return names
+  }
+
   fun getAllUsernames(): Set<String> {
-    return prefs.getStringSet("all_usernames", emptySet()) ?: emptySet()
+    val names = getAllUsernamesInternal()
+    if (names.isEmpty()) {
+      seedDefaultAccounts()
+      return getAllUsernamesInternal()
+    }
+    return names
   }
 
   private fun saveAllUsernames(set: Set<String>) {
-    prefs.edit().putStringSet("all_usernames", set).apply()
+    val arr = JSONArray()
+    set.forEach { arr.put(it) }
+    prefs.edit()
+      .putString("all_usernames_json", arr.toString())
+      .putStringSet("all_usernames", HashSet(set))
+      .commit()
+  }
+
+  private fun seedDefaultAccounts() {
+    val defaultList = listOf(
+      UserProfile(
+        username = "yemane",
+        phone = "0939383425",
+        playingTime = StringsDictionary.SLOTS[0].labelEn, // 4:00 O'clock
+        passwordHash = hashPassword("password123"),
+        walletBalance = 250
+      ),
+      UserProfile(
+        username = "abebe",
+        phone = "0911223344",
+        playingTime = StringsDictionary.SLOTS[1].labelEn, // 6:00 O'clock
+        passwordHash = hashPassword("password123"),
+        walletBalance = 100
+      ),
+      UserProfile(
+        username = "selam",
+        phone = "0922334455",
+        playingTime = StringsDictionary.SLOTS[5].labelEn, // 2:00 O'clock Night
+        passwordHash = hashPassword("password123"),
+        walletBalance = 60
+      ),
+      UserProfile(
+        username = "dawit",
+        phone = "0933445566",
+        playingTime = StringsDictionary.SLOTS[2].labelEn, // 8:00 O'clock
+        passwordHash = hashPassword("password123"),
+        walletBalance = 30
+      )
+    )
+    defaultList.forEach { saveUser(it) }
   }
 
   fun hashPassword(password: String): String {
@@ -218,20 +493,27 @@ class BingoRepository(context: Context) {
       o.put("st", p.status.name)
       arr.put(o)
     }
-    prefs.edit().putString("all_payments", arr.toString()).apply()
+    prefs.edit().putString("all_payments", arr.toString()).commit()
+    ioScope.launch {
+      try {
+        list.forEach { remoteService.savePaymentRequest(it) }
+      } catch (_: Exception) {}
+    }
   }
 
   fun addPaymentRequest(p: PaymentRequest) {
     val list = getPaymentRequests().toMutableList()
     list.add(p)
     savePaymentRequests(list)
-    recordRedeemedReceipt(
-      receiptId = p.receiptId,
-      username = p.username,
-      amountBirr = p.amountBirr,
-      receiver = "Yemane",
-      details = "Payment request: ${p.id}"
-    )
+    if (p.status == RequestStatus.APPROVED) {
+      recordRedeemedReceipt(
+        receiptId = p.receiptId,
+        username = p.username,
+        amountBirr = p.amountBirr,
+        receiver = "Yemane",
+        details = "Payment request: ${p.id}"
+      )
+    }
   }
 
   // --- Anti-Duplicate / Redeemed Receipts Store ---
@@ -323,7 +605,12 @@ class BingoRepository(context: Context) {
       o.put("st", w.status.name)
       arr.put(o)
     }
-    prefs.edit().putString("all_withdrawals", arr.toString()).apply()
+    prefs.edit().putString("all_withdrawals", arr.toString()).commit()
+    ioScope.launch {
+      try {
+        list.forEach { remoteService.saveWithdrawalRequest(it) }
+      } catch (_: Exception) {}
+    }
   }
 
   fun addWithdrawalRequest(w: WithdrawalRequest) {
@@ -381,7 +668,12 @@ class BingoRepository(context: Context) {
       o.put("ts", r.timestamp)
       arr.put(o)
     }
-    prefs.edit().putString("winners_history", arr.toString()).apply()
+    prefs.edit().putString("winners_history", arr.toString()).commit()
+    ioScope.launch {
+      try {
+        remoteService.saveWinner(record)
+      } catch (_: Exception) {}
+    }
   }
 
   // --- Schedule Calculation (Ethiopian UTC+3 Time) ---
@@ -391,18 +683,17 @@ class BingoRepository(context: Context) {
     return (timeMs + 3 * 3600000L) / DAY_MS
   }
 
-  // Calculates slot start time in epoch millis for offset day and Ethiopian hour
+  // Calculates slot start time in epoch millis for offset day and Ethiopian hour (GMT+3)
   fun getSlotStartTime(dayOffset: Int, hour: Int): Long {
-    val now = System.currentTimeMillis()
-    val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
-      timeInMillis = now + 3 * 3600000L // convert to Ethiopian UTC+3
+    val eatTz = TimeZone.getTimeZone("GMT+3")
+    val cal = Calendar.getInstance(eatTz).apply {
       add(Calendar.DAY_OF_MONTH, dayOffset)
       set(Calendar.HOUR_OF_DAY, hour)
       set(Calendar.MINUTE, 0)
       set(Calendar.SECOND, 0)
       set(Calendar.MILLISECOND, 0)
     }
-    return cal.timeInMillis - 3 * 3600000L // convert back to real UTC epoch
+    return cal.timeInMillis
   }
 
   data class SlotInfo(
@@ -436,24 +727,27 @@ class BingoRepository(context: Context) {
   }
 
   fun getNextSlot(targetLabel: String? = null): SlotInfo {
+    val targetSlot = StringsDictionary.findSlot(targetLabel)
     val now = System.currentTimeMillis()
     for (d in 0..2) {
       for (s in StringsDictionary.SLOTS) {
-        if (targetLabel != null && s.labelEn != targetLabel) continue
+        if (targetSlot != null && s.hourUtc != targetSlot.hourUtc) continue
         val info = getSlotInfo(d, s)
         if (info.startTime > now) {
           return info
         }
       }
     }
-    return getSlotInfo(1, StringsDictionary.SLOTS.first())
+    val fallbackSlot = targetSlot ?: StringsDictionary.SLOTS.first()
+    return getSlotInfo(1, fallbackSlot)
   }
 
   fun getActiveSlotSession(targetLabel: String? = null): SlotInfo? {
+    val targetSlot = StringsDictionary.findSlot(targetLabel)
     val now = System.currentTimeMillis()
     for (d in -1..1) {
       for (s in StringsDictionary.SLOTS) {
-        if (targetLabel != null && s.labelEn != targetLabel) continue
+        if (targetSlot != null && s.hourUtc != targetSlot.hourUtc) continue
         val info = getSlotInfo(d, s)
         if (now in info.startTime..info.sessionEndTime) {
           return info

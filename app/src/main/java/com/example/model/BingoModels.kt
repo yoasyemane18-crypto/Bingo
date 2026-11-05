@@ -8,6 +8,7 @@ enum class AppLanguage(val code: String, val displayName: String, val shortLabel
 
 enum class Screen {
   HOME,
+  SIGN_IN,
   REGISTER,
   PLAY_LOBBY,
   GAME,
@@ -59,11 +60,28 @@ data class BingoGoal(
 }
 
 data class GameSlot(
-  val hourUtc: Int, // Ethiopian time hour (UTC+3 offset)
+  val hourUtc: Int, // EAT / GMT+3 hour (10, 12, 14, 16, 18, 20)
+  val ethiopianHour: Int, // Ethiopian hour: 4, 6, 8, 10, 12, 2
   val labelEn: String,
   val labelAm: String,
   val labelTi: String
 ) {
+  constructor(hourUtc: Int, labelEn: String, labelAm: String, labelTi: String) : this(
+    hourUtc = hourUtc,
+    ethiopianHour = when (hourUtc) {
+      10 -> 4
+      12 -> 6
+      14 -> 8
+      16 -> 10
+      18 -> 12
+      20 -> 2
+      else -> 4
+    },
+    labelEn = labelEn,
+    labelAm = labelAm,
+    labelTi = labelTi
+  )
+
   fun label(lang: AppLanguage): String = when (lang) {
     AppLanguage.EN -> labelEn
     AppLanguage.AM -> labelAm

@@ -15,6 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -22,8 +23,10 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -53,6 +56,7 @@ import com.example.ui.theme.BingoGold
 import com.example.ui.theme.BingoGoldDark
 import com.example.ui.theme.BingoGoldLight
 import com.example.ui.theme.BingoGreen
+import com.example.ui.theme.BingoGreenLight
 import com.example.ui.theme.BingoNight
 import com.example.ui.theme.BingoPurpleDeep
 import com.example.ui.theme.BingoRed
@@ -78,12 +82,14 @@ fun AdminScreen(
   onDeclineWithdrawal: (String) -> Unit,
   onAdjustBalance: (String, Int) -> Unit,
   onDeleteUser: (String) -> Unit,
+  onRefreshData: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   var emailInput by remember { mutableStateOf("") }
   var passwordInput by remember { mutableStateOf("") }
   var selectedTab by remember { mutableIntStateOf(0) }
   var userSearchQuery by remember { mutableStateOf("") }
+  var userToDelete by remember { mutableStateOf<String?>(null) }
 
   Column(
     modifier = modifier
@@ -171,7 +177,7 @@ fun AdminScreen(
       val pendingWds = withdrawalRequests.filter { it.status == RequestStatus.PENDING }
 
       val tabTitles = listOf(
-        "Payments (${pendingPays.size})",
+        "Payments (${paymentRequests.size})",
         "Users (${allUsers.size})",
         "Withdrawals (${pendingWds.size})",
         "Winners",
@@ -212,88 +218,149 @@ fun AdminScreen(
       Spacer(modifier = Modifier.height(16.dp))
 
       when (selectedTab) {
-        // Tab 0: Payments
+        // Tab 0: Payments (Auto-Processed)
         0 -> {
           Text(
-            text = "Pending Payments (${pendingPays.size})",
+            text = "Payment Transactions (${paymentRequests.size})",
             fontWeight = FontWeight.Bold,
             fontSize = 18.sp,
             color = BingoGoldLight
           )
 
+          Spacer(modifier = Modifier.height(4.dp))
+
+          Text(
+            text = "⚡ System Auto-Verification Active: Official receiver 0939383425 (Yemane) and amount matching are verified automatically upon submission.",
+            fontSize = 12.sp,
+            color = BingoGreenLight
+          )
+
           Spacer(modifier = Modifier.height(10.dp))
 
-          if (pendingPays.isEmpty()) {
-            Text("No pending payments.", color = BingoTextMuted, fontSize = 14.sp)
+          if (paymentRequests.isEmpty()) {
+            Text("No payments submitted yet.", color = BingoTextMuted, fontSize = 14.sp)
           } else {
-            pendingPays.forEach { p ->
+            paymentRequests.reversed().forEach { p ->
               var editAmt by remember(p.id) { mutableStateOf(p.amountBirr.toString()) }
 
               Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = BingoCardBg),
-                border = androidx.compose.foundation.BorderStroke(1.dp, BingoBorderPurple),
+                border = androidx.compose.foundation.BorderStroke(
+                  1.dp,
+                  when (p.status) {
+                    RequestStatus.APPROVED -> BingoGreen.copy(alpha = 0.5f)
+                    RequestStatus.DECLINED -> BingoRed.copy(alpha = 0.5f)
+                    RequestStatus.PENDING -> BingoGold.copy(alpha = 0.5f)
+                  }
+                ),
                 modifier = Modifier
                   .fillMaxWidth()
                   .padding(vertical = 6.dp)
               ) {
                 Column(modifier = Modifier.padding(14.dp)) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Text(
+                      text = "${p.username} · ${p.phone}",
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 16.sp,
+                      color = BingoGold
+                    )
+
+                    // Status Badge
+                    Surface(
+                      color = when (p.status) {
+                        RequestStatus.APPROVED -> BingoGreen.copy(alpha = 0.2f)
+                        RequestStatus.DECLINED -> BingoRed.copy(alpha = 0.2f)
+                        RequestStatus.PENDING -> BingoGold.copy(alpha = 0.2f)
+                      },
+                      shape = RoundedCornerShape(8.dp),
+                      border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        when (p.status) {
+                          RequestStatus.APPROVED -> BingoGreen
+                          RequestStatus.DECLINED -> BingoRed
+                          RequestStatus.PENDING -> BingoGold
+                        }
+                      )
+                    ) {
+                      Text(
+                        text = when (p.status) {
+                          RequestStatus.APPROVED -> "✔ APPROVED"
+                          RequestStatus.DECLINED -> "✖ DECLINED"
+                          RequestStatus.PENDING -> "⏳ PENDING"
+                        },
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = when (p.status) {
+                          RequestStatus.APPROVED -> BingoGreenLight
+                          RequestStatus.DECLINED -> BingoRedLight
+                          RequestStatus.PENDING -> BingoGoldLight
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                      )
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.height(4.dp))
+
                   Text(
-                    text = "${p.username} · ${p.phone}",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = BingoGold
-                  )
-                  Text(
-                    text = "Receipt: ${p.receiptId}",
+                    text = "Amount: ${p.amountBirr} Birr · Receipt: ${p.receiptId}",
                     fontSize = 14.sp,
                     color = BingoTextWhite
                   )
+
                   if (p.receiptLink.isNotEmpty()) {
                     Text(
                       text = p.receiptLink,
                       fontSize = 12.sp,
-                      color = BingoTextMuted
+                      color = if (p.status == RequestStatus.DECLINED) BingoRedLight.copy(alpha = 0.8f) else BingoTextMuted
                     )
                   }
 
-                  Spacer(modifier = Modifier.height(8.dp))
-
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                  ) {
-                    OutlinedTextField(
-                      value = editAmt,
-                      onValueChange = { editAmt = it },
-                      label = { Text("Birr") },
-                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                      modifier = Modifier.weight(1f),
-                      singleLine = true,
-                      colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = BingoTextWhite,
-                        unfocusedTextColor = BingoTextWhite
+                  // Only show manual override actions if legacy pending
+                  if (p.status == RequestStatus.PENDING) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                      modifier = Modifier.fillMaxWidth(),
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                      OutlinedTextField(
+                        value = editAmt,
+                        onValueChange = { editAmt = it },
+                        label = { Text("Birr") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                          focusedTextColor = BingoTextWhite,
+                          unfocusedTextColor = BingoTextWhite
+                        )
                       )
-                    )
 
-                    Button(
-                      onClick = {
-                        val amt = editAmt.toIntOrNull() ?: p.amountBirr
-                        onApprovePayment(p.id, amt)
-                      },
-                      colors = ButtonDefaults.buttonColors(containerColor = BingoGreen),
-                      shape = RoundedCornerShape(8.dp)
-                    ) {
-                      Text("Approve", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
+                      Button(
+                        onClick = {
+                          val amt = editAmt.toIntOrNull() ?: p.amountBirr
+                          onApprovePayment(p.id, amt)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BingoGreen),
+                        shape = RoundedCornerShape(8.dp)
+                      ) {
+                        Text("Approve", color = Color.White, fontWeight = FontWeight.Bold)
+                      }
 
-                    Button(
-                      onClick = { onDeclinePayment(p.id) },
-                      colors = ButtonDefaults.buttonColors(containerColor = BingoRed),
-                      shape = RoundedCornerShape(8.dp)
-                    ) {
-                      Text("Decline", color = Color.White, fontWeight = FontWeight.Bold)
+                      Button(
+                        onClick = { onDeclinePayment(p.id) },
+                        colors = ButtonDefaults.buttonColors(containerColor = BingoRed),
+                        shape = RoundedCornerShape(8.dp)
+                      ) {
+                        Text("Decline", color = Color.White, fontWeight = FontWeight.Bold)
+                      }
                     }
                   }
                 }
@@ -304,6 +371,29 @@ fun AdminScreen(
 
         // Tab 1: Users
         1 -> {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(
+              text = "Registered Players (${allUsers.size})",
+              fontWeight = FontWeight.Bold,
+              fontSize = 18.sp,
+              color = BingoGoldLight
+            )
+
+            Button(
+              onClick = onRefreshData,
+              colors = ButtonDefaults.buttonColors(containerColor = BingoGoldDark),
+              shape = RoundedCornerShape(8.dp)
+            ) {
+              Text("Sync Cloud", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+          }
+
+          Spacer(modifier = Modifier.height(10.dp))
+
           OutlinedTextField(
             value = userSearchQuery,
             onValueChange = { userSearchQuery = it },
@@ -404,7 +494,7 @@ fun AdminScreen(
                   Spacer(modifier = Modifier.height(8.dp))
 
                   Button(
-                    onClick = { onDeleteUser(u.username) },
+                    onClick = { userToDelete = u.username },
                     colors = ButtonDefaults.buttonColors(containerColor = BingoRed),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -414,6 +504,42 @@ fun AdminScreen(
                 }
               }
             }
+          }
+
+          if (userToDelete != null) {
+            AlertDialog(
+              onDismissRequest = { userToDelete = null },
+              title = {
+                Text(
+                  text = "Confirm Delete User",
+                  fontWeight = FontWeight.Bold,
+                  color = BingoGoldLight
+                )
+              },
+              text = {
+                Text(
+                  text = "Are you sure you want to delete user '${userToDelete}'? Their wallet balance and account data will be permanently removed.",
+                  color = BingoTextWhite
+                )
+              },
+              confirmButton = {
+                Button(
+                  onClick = {
+                    userToDelete?.let { onDeleteUser(it) }
+                    userToDelete = null
+                  },
+                  colors = ButtonDefaults.buttonColors(containerColor = BingoRed)
+                ) {
+                  Text("Confirm Delete", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+              },
+              dismissButton = {
+                TextButton(onClick = { userToDelete = null }) {
+                  Text("Cancel", color = BingoGold)
+                }
+              },
+              containerColor = BingoCardBg
+            )
           }
         }
 
