@@ -109,7 +109,9 @@ fun LobbyScreen(
   withdrawalRequests: List<WithdrawalRequest>,
   isCountdownFinished: Boolean = false,
   hasCartelaTicket: Boolean = false,
+  occupiedCartelas: Map<Int, String> = emptyMap(),
   onCardSelected: (Int) -> Unit,
+  onOccupiedCardClicked: (Int) -> Unit = {},
   onRefreshSeed: () -> Unit,
   onStartGame: () -> Unit,
   onStartPracticeGame: () -> Unit = {},
@@ -196,8 +198,12 @@ fun LobbyScreen(
             quickGoInput = input
             val n = input.toIntOrNull()
             if (n != null && n in 1..500) {
-              onCardSelected(n)
               cardPage = (n - 1) / pageSize
+              if (occupiedCartelas.containsKey(n) && occupiedCartelas[n] != currentUser?.username) {
+                onOccupiedCardClicked(n)
+              } else {
+                onCardSelected(n)
+              }
             }
           }
         },
@@ -285,6 +291,87 @@ fun LobbyScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        // Status Legend: Available / Selected / Occupied (Red Color)
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 2.dp, vertical = 2.dp),
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          // Available
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            Box(
+              modifier = Modifier
+                .size(12.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(BingoSurface)
+                .border(0.5.dp, BingoBorderLight, RoundedCornerShape(3.dp))
+            )
+            Text(
+              text = when (language) {
+                AppLanguage.EN -> "Available"
+                AppLanguage.AM -> "ክፍት"
+                AppLanguage.TI -> "ክፉት"
+              },
+              color = BingoTextMuted,
+              fontSize = 11.sp
+            )
+          }
+
+          // Selected
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            Box(
+              modifier = Modifier
+                .size(12.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(BingoGold)
+            )
+            Text(
+              text = when (language) {
+                AppLanguage.EN -> "Selected"
+                AppLanguage.AM -> "የተመረጠ"
+                AppLanguage.TI -> "እተመረጸ"
+              },
+              color = BingoGoldLight,
+              fontSize = 11.sp,
+              fontWeight = FontWeight.SemiBold
+            )
+          }
+
+          // Occupied (Red Color)
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            Box(
+              modifier = Modifier
+                .size(12.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(BingoRed)
+                .border(0.5.dp, BingoRedLight, RoundedCornerShape(3.dp))
+            )
+            Text(
+              text = when (language) {
+                AppLanguage.EN -> "Occupied (Red)"
+                AppLanguage.AM -> "ተይዟል (ቀይ)"
+                AppLanguage.TI -> "ተታሒዙ (ቀይሕ)"
+              },
+              color = BingoRedLight,
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold
+            )
+          }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
         // Grid of 50 numbers (5 rows of 10)
         FlowRow(
           modifier = Modifier.fillMaxWidth(),
@@ -293,30 +380,55 @@ fun LobbyScreen(
           maxItemsInEachRow = 10
         ) {
           pageCards.forEach { cardNum ->
-            val isSelected = selectedCardsList.contains(cardNum)
+            val isOccupied = occupiedCartelas.containsKey(cardNum)
+            val isOccupiedByOther = isOccupied && occupiedCartelas[cardNum] != currentUser?.username
+            val isOccupiedByMe = isOccupied && occupiedCartelas[cardNum] == currentUser?.username
+            val isSelected = selectedCardsList.contains(cardNum) || isOccupiedByMe
             val isCurrentPreview = selectedCardNumber == cardNum
+
+            val bgColor = when {
+              isOccupiedByOther -> BingoRed
+              isSelected -> BingoGold
+              else -> BingoSurface
+            }
+
+            val borderColor = when {
+              isOccupiedByOther -> BingoRedLight
+              isCurrentPreview -> Color.White
+              else -> BingoBorderLight
+            }
+
+            val textColor = when {
+              isOccupiedByOther -> Color.White
+              isSelected -> BingoTextDark
+              else -> BingoTextWhite
+            }
 
             Box(
               modifier = Modifier
                 .size(28.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(
-                  if (isSelected) BingoGold else BingoSurface
-                )
+                .background(bgColor)
                 .border(
-                  width = if (isCurrentPreview) 2.dp else 1.dp,
-                  color = if (isCurrentPreview) Color.White else BingoBorderLight,
+                  width = if (isCurrentPreview || isOccupiedByOther) 2.dp else 1.dp,
+                  color = borderColor,
                   shape = RoundedCornerShape(6.dp)
                 )
-                .clickable { onCardSelected(cardNum) }
+                .clickable {
+                  if (isOccupiedByOther) {
+                    onOccupiedCardClicked(cardNum)
+                  } else {
+                    onCardSelected(cardNum)
+                  }
+                }
                 .testTag("card_select_$cardNum"),
               contentAlignment = Alignment.Center
             ) {
               Text(
                 text = "$cardNum",
-                color = if (isSelected) BingoTextDark else BingoTextWhite,
+                color = textColor,
                 fontSize = 11.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                fontWeight = if (isSelected || isOccupiedByOther) FontWeight.Bold else FontWeight.Normal
               )
             }
           }
@@ -354,12 +466,13 @@ fun LobbyScreen(
 
     Text(
       text = when (language) {
-        AppLanguage.EN -> "1 cartela = 30 Birr for 3 consecutive games in this session"
-        AppLanguage.AM -> "1 ካርቴላ = 30 ብር ለ 3ቱ ተከታታይ ጨዋታዎች"
-        AppLanguage.TI -> "1 ካርቴላ = 30 ብር ን 3ቲኦም ተኸታተልቲ ጸወታታት"
+        AppLanguage.EN -> "1 cartela = 30 Birr for 3 games (10 Birr per 1 game)"
+        AppLanguage.AM -> "1 ካርቴላ = 30 ብር ለ 3 ጨዋታዎች (በአንድ ጨዋታ 10 ብር)"
+        AppLanguage.TI -> "1 ካርቴላ = 30 ብር ን 3 ጸወታታት (ኣብ ሓደ ጸወታ 10 ብር)"
       },
       color = BingoGoldLight,
-      fontSize = 12.sp,
+      fontSize = 13.sp,
+      fontWeight = FontWeight.SemiBold,
       textAlign = TextAlign.Center
     )
 

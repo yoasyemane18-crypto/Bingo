@@ -162,6 +162,8 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             withdrawalRequests = uiState.withdrawalRequests,
             isCountdownFinished = uiState.isCountdownFinished,
             hasCartelaTicket = uiState.hasCartelaTicketForSession,
+            occupiedCartelas = uiState.occupiedCartelas,
+            onOccupiedCardClicked = { num -> viewModel.notifyOccupiedCard(num) },
             onCardSelected = { num -> viewModel.selectCard(num) },
             onRefreshSeed = { viewModel.refreshSeed() },
             onStartGame = {
@@ -196,6 +198,7 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             showConfetti = uiState.showConfetti,
             winnerCardNum = uiState.winnerCardNum,
             winnerCallsCount = uiState.winnerCallsCount,
+            winnerNotice = uiState.winnerNotice,
             currentRoundNumber = uiState.currentRoundNumber,
             totalSessionRounds = uiState.totalSessionRounds,
             isIntermission = uiState.isIntermission,

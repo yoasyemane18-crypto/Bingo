@@ -320,7 +320,7 @@ fun LoginScreen(
               Icon(
                 imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                 contentDescription = if (passwordVisible) "Hide password" else "Show password",
-                tint = BingoTextMuted
+                tint = BingoGoldLight
               )
             }
           },

@@ -15,11 +15,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.ScrollableTabRow
@@ -40,6 +45,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
@@ -87,6 +93,7 @@ fun AdminScreen(
 ) {
   var emailInput by remember { mutableStateOf("") }
   var passwordInput by remember { mutableStateOf("") }
+  var passwordVisible by remember { mutableStateOf(false) }
   var selectedTab by remember { mutableIntStateOf(0) }
   var userSearchQuery by remember { mutableStateOf("") }
   var userToDelete by remember { mutableStateOf<String?>(null) }
@@ -147,7 +154,19 @@ fun AdminScreen(
             value = passwordInput,
             onValueChange = { passwordInput = it },
             label = { Text("Password") },
-            visualTransformation = PasswordVisualTransformation(),
+            trailingIcon = {
+              IconButton(
+                onClick = { passwordVisible = !passwordVisible },
+                modifier = Modifier.testTag("admin_password_visibility_toggle")
+              ) {
+                Icon(
+                  imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                  contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                  tint = BingoGoldLight
+                )
+              }
+            },
+            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
             singleLine = true,
             modifier = Modifier
               .fillMaxWidth()

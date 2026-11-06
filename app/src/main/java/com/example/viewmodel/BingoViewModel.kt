@@ -58,10 +58,13 @@ data class BingoUiState(
   val selectedCardNumber: Int = 1,
   val cardSeed: Long = 1L,
   val selectedCardsList: List<Int> = listOf(1),
+  val occupiedCartelas: Map<Int, String> = emptyMap(),
   val previewCard: BingoCard = BingoEngine.generateCard(1, 1L),
   val lobbyMessage: String = "",
 
   // In-Game Arena State
+  val currentSessionId: String? = null,
+  val activePlayerCount: Int = 1,
   val isPracticeMode: Boolean = true,
   val activeRound: ActiveRound? = null,
   val currentRoundNumber: Int = 1,
@@ -157,6 +160,21 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         lobbyMessage = ""
       )
     }
+    if (screen == Screen.PLAY_LOBBY) {
+      val userSlot = _uiState.value.currentUser?.playingTime
+      val targetSession = repository.getActiveSlotSession(userSlot) ?: repository.getNextSlot(userSlot)
+      val sessionId = targetSession.sessionId
+      val localOccupied = repository.getOccupiedCartelas(sessionId)
+      _uiState.update { it.copy(occupiedCartelas = localOccupied) }
+      viewModelScope.launch(Dispatchers.IO) {
+        val remoteOccupied = repository.remoteService.fetchSessionOccupiedCartelas(sessionId)
+        val merged = localOccupied + remoteOccupied
+        if (merged.isNotEmpty()) {
+          repository.saveOccupiedCartelas(sessionId, merged)
+          _uiState.update { it.copy(occupiedCartelas = merged) }
+        }
+      }
+    }
     refreshData()
   }
 
@@ -225,6 +243,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
 
   private fun startCountdownTicker() {
     countdownJob?.cancel()
+    var tickerTick = 0
     countdownJob = viewModelScope.launch {
       while (true) {
         val userSlot = _uiState.value.currentUser?.playingTime
@@ -250,6 +269,21 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
             isGameInProgress = isSessionActive,
             isCountdownFinished = isFinished
           )
+        }
+
+        // Periodically refresh occupied cartelas for this playing time session
+        val targetSession = activeSession ?: nextSlot
+        val sessionId = targetSession.sessionId
+        if (tickerTick++ % 3 == 0) {
+          viewModelScope.launch(Dispatchers.IO) {
+            val remoteOccupied = repository.remoteService.fetchSessionOccupiedCartelas(sessionId)
+            val localOccupied = repository.getOccupiedCartelas(sessionId)
+            val merged = localOccupied + remoteOccupied
+            if (merged.isNotEmpty()) {
+              repository.saveOccupiedCartelas(sessionId, merged)
+              _uiState.update { it.copy(occupiedCartelas = merged) }
+            }
+          }
         }
 
         // Auto-launch if user reserved cartela and countdown hits 0 while in lobby
@@ -349,6 +383,14 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
 
   fun selectCard(num: Int) {
     if (num !in 1..500) return
+    val user = _uiState.value.currentUser
+    val occupied = _uiState.value.occupiedCartelas
+    val owner = occupied[num]
+    if (owner != null && owner != user?.username) {
+      notifyOccupiedCard(num)
+      return
+    }
+
     val currentList = _uiState.value.selectedCardsList.toMutableList()
     if (currentList.contains(num)) {
       if (currentList.size > 1) {
@@ -373,6 +415,15 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         lobbyMessage = ""
       )
     }
+  }
+
+  fun notifyOccupiedCard(cardNum: Int) {
+    val occupiedMsg = when (_uiState.value.language) {
+      AppLanguage.EN -> "Occupied"
+      AppLanguage.AM -> "ተይዟል"
+      AppLanguage.TI -> "ተታሒዙ"
+    }
+    showToast(occupiedMsg)
   }
 
   fun refreshSeed() {
@@ -679,6 +730,31 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     val isSessionActive = activeSession != null
     val diffMs = if (isSessionActive) 0L else (nextSlot.startTime - now).coerceAtLeast(0L)
     val isCountdownFinished = isSessionActive || diffMs == 0L
+    val targetSession = activeSession ?: nextSlot
+    val sessionId = targetSession.sessionId
+
+    // Check if any selected cartela is occupied by another player for this playing time
+    val currentOccupied = _uiState.value.occupiedCartelas
+    val conflictCard = selected.firstOrNull { num ->
+      val owner = currentOccupied[num]
+      owner != null && owner != user.username
+    }
+    if (conflictCard != null) {
+      val occupiedWord = when (_uiState.value.language) {
+        AppLanguage.EN -> "Occupied"
+        AppLanguage.AM -> "ተይዟል"
+        AppLanguage.TI -> "ተታሒዙ"
+      }
+      showToast(occupiedWord)
+      showAlert(
+        when (_uiState.value.language) {
+          AppLanguage.EN -> "Cartela #$conflictCard is occupied by another player. Different players cannot buy the same cartela at the same playing time. Please select another cartela."
+          AppLanguage.AM -> "ካርቴላ #$conflictCard በሌላ ተጫዋች ተይዟል (Occupied)። የተለያዩ ተጫዋቾች በተመሳሳይ የጨዋታ ሰዓት ተመሳሳይ ካርቴላ መግዛት አይችሉም። እባክዎ ሌላ ካርቴላ ይምረጡ።"
+          AppLanguage.TI -> "ካርቴላ #$conflictCard ብኻልእ ተጻዋታይ ተታሒዙ እዩ (Occupied)። እባክኹም ካልእ ካርቴላ ሕረዩ።"
+        }
+      )
+      return false
+    }
 
     // If user has not purchased cartela ticket for this session yet:
     if (!_uiState.value.hasCartelaTicketForSession) {
@@ -687,12 +763,12 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         return false
       }
 
-      // Deduct cartela fee (30 Birr per cartela covers all 3 consecutive games)
+      // Deduct cartela fee (30 Birr per cartela covers all 3 consecutive games: 10 Birr per game)
       val newBal = user.walletBalance - cost
-      val slotLabel = (activeSession?.slot ?: nextSlot.slot).labelEn
+      val slotLabel = targetSession.slot.labelEn
       val tx = WalletTransaction(
         id = UUID.randomUUID().toString(),
-        label = "Cartela ×${selected.size} for 3 Games ($slotLabel)",
+        label = "Cartela ×${selected.size} for 3 Games (10 Birr/game - $slotLabel)",
         amount = -cost
       )
       val updatedUser = user.copy(
@@ -700,11 +776,21 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         transactions = user.transactions + tx
       )
       repository.saveUser(updatedUser)
+
+      // Register player and claim cartelas in the shared session
+      repository.claimCartelas(sessionId, user.username, selected)
+      viewModelScope.launch(Dispatchers.IO) {
+        repository.remoteService.registerPlayerInSession(sessionId, user.username, selected)
+      }
+      val updatedOccupied = _uiState.value.occupiedCartelas.toMutableMap()
+      selected.forEach { updatedOccupied[it] = user.username }
+
       _uiState.update {
         it.copy(
           currentUser = updatedUser,
           hasCartelaTicketForSession = true,
-          ticketCards = selected
+          ticketCards = selected,
+          occupiedCartelas = updatedOccupied
         )
       }
     }
@@ -713,10 +799,11 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     if (!isCountdownFinished) {
       val targetLabel = (activeSession?.slot ?: nextSlot.slot).label(_uiState.value.language)
       showAlert(
-        "✔ Cartela Purchased for 30 Birr!\n\n" +
+        "✔ Cartela Purchased for $cost Birr (3 Games · 10 Birr per game)!\n\n" +
           "Game starts ONLY at your playing time:\n" +
           "⏰ $targetLabel (Ethiopian Time)\n\n" +
           "Starts in: ${_uiState.value.countdownText} when countdown reaches 00:00:00.\n" +
+          "All players on different devices start together with identical numbers and target goals!\n" +
           "All 3 games will be played consecutively one after another.\n" +
           "You can play Practice Mode while waiting!"
       )
@@ -735,17 +822,35 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     } else {
       _uiState.value.selectedCardsList.sorted()
     }
+    val slot = StringsDictionary.findSlot(user.playingTime) ?: StringsDictionary.SLOTS.first()
+    val slotInfo = repository.getActiveSlotSession(user.playingTime) ?: repository.getNextSlot(user.playingTime)
+    val sessionId = slotInfo.sessionId
     val cards = selected.map { cardNum ->
       BingoEngine.generateCard(cardNum, _uiState.value.cardSeed)
     }
-    val cost = selected.size * BingoRepository.PAY_BIRR
-    val prize = (cost * BingoRepository.PRIZE_PERCENTAGE).toInt().coerceAtLeast(30)
+
+    // Register user in the multiplayer session on Firebase & fetch players
+    viewModelScope.launch(Dispatchers.IO) {
+      repository.remoteService.registerPlayerInSession(sessionId, user.username, selected.size)
+      val count = repository.remoteService.fetchSessionPlayerCount(sessionId)
+      _uiState.update { it.copy(activePlayerCount = count) }
+    }
+
+    // 1 cartela = 30 Birr for 3 games (10 Birr per 1 game)
+    val players = _uiState.value.activePlayerCount.coerceAtLeast(2)
+    val roundCost = selected.size * BingoRepository.BIRR_PER_GAME * players
+    val roundPrize = (roundCost * BingoRepository.PRIZE_PERCENTAGE).toInt().coerceAtLeast(20)
     val slotLabel = user.playingTime
+
+    val firstRound = slotInfo.rounds.firstOrNull() ?: ActiveRound(
+      1, "r1", System.currentTimeMillis(), System.currentTimeMillis() + 400000L, slotLabel
+    )
 
     _uiState.update {
       it.copy(
         isPracticeMode = false,
-        activeRound = ActiveRound(1, "r1", System.currentTimeMillis(), System.currentTimeMillis() + 400000L, slotLabel),
+        currentSessionId = sessionId,
+        activeRound = firstRound,
         currentRoundNumber = 1,
         totalSessionRounds = 3,
         sessionTotalWonBirr = 0,
@@ -753,7 +858,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         sessionSummaryDialog = false,
         activeCards = cards,
         activeCardIndex = 0,
-        winnerRewardBirr = prize
+        winnerRewardBirr = roundPrize
       )
     }
 
@@ -763,18 +868,50 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
 
   fun startRound(roundNum: Int) {
     intermissionJob?.cancel()
+    val isPractice = _uiState.value.isPracticeMode
+    val user = _uiState.value.currentUser
+    val slot = StringsDictionary.findSlot(user?.playingTime) ?: StringsDictionary.SLOTS.first()
+    val dayIdx = repository.getEthiopianDayIndex()
+
+    // Canonical synchronized seed and goal:
+    // Every player on any device in this slot and round receives identical seed and goal!
+    val seed = if (isPractice) {
+      (1..999999999L).random()
+    } else {
+      repository.getCanonicalRoundSeed(slot.hourUtc, dayIdx, roundNum)
+    }
+
+    val goal = if (isPractice) {
+      StringsDictionary.ALL_GOALS[((seed / 1000) % StringsDictionary.ALL_GOALS.size).toInt()]
+    } else {
+      repository.getCanonicalRoundGoal(slot.hourUtc, dayIdx, roundNum)
+    }
+
     val cards = _uiState.value.activeCards.map { card ->
       card.copy(
         markedCells = setOf(Pair(2, 2)),
         winningCells = emptySet()
       )
     }
-    val newSeed = System.currentTimeMillis() + roundNum * 7919L
-    val goal = StringsDictionary.ALL_GOALS[((newSeed / 1000) % StringsDictionary.ALL_GOALS.size).toInt()]
+
+    val cartelaCount = _uiState.value.activeCards.size.coerceAtLeast(1)
+    val players = _uiState.value.activePlayerCount.coerceAtLeast(2)
+    val roundPrize = if (isPractice) {
+      0
+    } else {
+      val roundPool = cartelaCount * players * BingoRepository.BIRR_PER_GAME
+      (roundPool * BingoRepository.PRIZE_PERCENTAGE).toInt().coerceAtLeast(20)
+    }
+
+    val slotInfo = if (!isPractice) {
+      repository.getActiveSlotSession(user?.playingTime) ?: repository.getNextSlot(user?.playingTime)
+    } else null
+    val targetRound = slotInfo?.rounds?.getOrNull(roundNum - 1) ?: _uiState.value.activeRound
 
     _uiState.update {
       it.copy(
         currentRoundNumber = roundNum,
+        activeRound = targetRound,
         isIntermission = false,
         intermissionSecondsLeft = 0,
         activeCards = cards,
@@ -787,11 +924,13 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         showConfetti = false,
         winnerCardNum = null,
         winnerCallsCount = null,
+        winnerNotice = null,
+        winnerRewardBirr = roundPrize,
         gameStatusMessage = ""
       )
     }
 
-    launchGameLoop(newSeed)
+    launchGameLoop(seed, roundNum)
   }
 
   fun startIntermissionToNextRound() {
@@ -854,9 +993,12 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
 
   // --- Live Bingo Game Loop ---
 
-  private fun launchGameLoop(seed: Long) {
+  private fun launchGameLoop(seed: Long, roundNum: Int = _uiState.value.currentRoundNumber) {
     gameLoopJob?.cancel()
     val fullSequence = BingoEngine.generateCallingSequence(seed)
+    val sessionId = _uiState.value.currentSessionId
+    val isPractice = _uiState.value.isPracticeMode
+    val myUsername = _uiState.value.currentUser?.username ?: ""
 
     gameLoopJob = viewModelScope.launch {
       // 1. Ready Countdown phase (Ready, 3, 2, 1)
@@ -868,7 +1010,39 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       }
       _uiState.update { it.copy(readyCountdownStep = null) }
 
-      // 2. Draw ball every 5000ms
+      // 2. Concurrent remote winner polling for real multiplayer
+      val remotePollJob = if (!isPractice && sessionId != null) {
+        launch(Dispatchers.IO) {
+          while (!_uiState.value.isGameEnded && !_uiState.value.isIntermission) {
+            delay(2000L)
+            try {
+              val remoteWinner = repository.remoteService.fetchRoundWinner(sessionId, roundNum)
+              if (remoteWinner != null && remoteWinner.username.isNotBlank() && remoteWinner.username != myUsername) {
+                // Another player called BINGO on their device!
+                val winMsg = "${remoteWinner.username} called BINGO! (Card #${remoteWinner.cardNum})"
+                val amharicWinMsg = "${remoteWinner.username} ቢንጎ ብሏል! (ካርድ #${remoteWinner.cardNum})"
+                soundManager.speak(winMsg, amharicWinMsg)
+                _uiState.update {
+                  it.copy(
+                    isGameEnded = true,
+                    winnerNotice = winMsg,
+                    gameStatusMessage = winMsg
+                  )
+                }
+                delay(3000L)
+                if (roundNum < 3) {
+                  startIntermissionToNextRound()
+                } else {
+                  completeSession()
+                }
+                break
+              }
+            } catch (_: Exception) {}
+          }
+        }
+      } else null
+
+      // 3. Draw ball every 5000ms
       for (drawn in fullSequence) {
         if (_uiState.value.isGameEnded || _uiState.value.isIntermission) break
 
@@ -890,6 +1064,8 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
 
         delay(BingoRepository.CALL_INTERVAL_MS)
       }
+
+      remotePollJob?.cancel()
 
       if (!_uiState.value.isGameEnded && !_uiState.value.isIntermission && _uiState.value.calledNumbers.size >= 75) {
         _uiState.update {
@@ -987,6 +1163,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     val calls = _uiState.value.calledNumbers.size
     val reward = _uiState.value.winnerRewardBirr ?: if (_uiState.value.isPracticeMode) 0 else 70
     val currentRound = _uiState.value.currentRoundNumber
+    val sessionId = _uiState.value.currentSessionId
 
     // Highlight winning cells on the card
     val updatedCards = cards.toMutableList()
@@ -1007,18 +1184,26 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         transactions = user.transactions + tx
       )
       repository.saveUser(updatedUser)
-      repository.addWinner(
-        WinnerRecord(
-          id = UUID.randomUUID().toString().take(8),
-          username = user.username,
-          phone = user.phone,
-          slotLabel = user.playingTime,
-          roundNumber = currentRound,
-          rewardBirr = reward,
-          cardNum = winningCard.cardNum,
-          callCount = calls
-        )
+
+      val winnerRecord = WinnerRecord(
+        id = UUID.randomUUID().toString().take(8),
+        username = user.username,
+        phone = user.phone,
+        slotLabel = user.playingTime,
+        roundNumber = currentRound,
+        rewardBirr = reward,
+        cardNum = winningCard.cardNum,
+        callCount = calls
       )
+      repository.addWinner(winnerRecord)
+
+      // Post round winner to Firebase so all other devices in the session detect it!
+      if (sessionId != null) {
+        viewModelScope.launch(Dispatchers.IO) {
+          repository.remoteService.postRoundWinner(sessionId, currentRound, winnerRecord)
+        }
+      }
+
       _uiState.update {
         it.copy(
           currentUser = updatedUser,

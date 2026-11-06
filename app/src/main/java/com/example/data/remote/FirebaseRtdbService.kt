@@ -348,6 +348,149 @@ class FirebaseRtdbService {
     }
   }
 
+  fun claimSessionCartelas(sessionId: String, username: String, cardNumbers: List<Int>): Boolean {
+    if (cardNumbers.isEmpty()) return true
+    val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/cartelas.json"
+    val json = JSONObject()
+    cardNumbers.forEach { num ->
+      json.put(num.toString(), username)
+    }
+    val requestBody = json.toString().toRequestBody(jsonMediaType)
+    val request = Request.Builder().url(url).patch(requestBody).build()
+    return try {
+      httpClient.newCall(request).execute().use { it.isSuccessful }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  fun fetchSessionOccupiedCartelas(sessionId: String): Map<Int, String> {
+    val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/cartelas.json"
+    val request = Request.Builder().url(url).get().build()
+    val map = mutableMapOf<Int, String>()
+    return try {
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) return emptyMap()
+        val body = response.body?.string() ?: return emptyMap()
+        if (body == "null" || body.isBlank()) return emptyMap()
+        val root = JSONObject(body)
+        val keys = root.keys()
+        while (keys.hasNext()) {
+          val key = keys.next()
+          val cardNum = key.toIntOrNull() ?: continue
+          val owner = root.optString(key, "")
+          if (owner.isNotBlank()) {
+            map[cardNum] = owner
+          }
+        }
+        map
+      }
+    } catch (_: Exception) {
+      emptyMap()
+    }
+  }
+
+  fun registerPlayerInSession(sessionId: String, username: String, cartelaCount: Int): Boolean {
+    val encodedUser = try { URLEncoder.encode(username, "UTF-8") } catch (_: Exception) { username }
+    val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/players/$encodedUser.json"
+    val json = JSONObject().apply {
+      put("u", username)
+      put("cards", cartelaCount)
+      put("ts", System.currentTimeMillis())
+    }
+    val requestBody = json.toString().toRequestBody(jsonMediaType)
+    val request = Request.Builder().url(url).put(requestBody).build()
+    return try {
+      httpClient.newCall(request).execute().use { it.isSuccessful }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  fun registerPlayerInSession(sessionId: String, username: String, cardNumbers: List<Int>): Boolean {
+    val encodedUser = try { URLEncoder.encode(username, "UTF-8") } catch (_: Exception) { username }
+    val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/players/$encodedUser.json"
+    val json = JSONObject().apply {
+      put("u", username)
+      put("cards", cardNumbers.size)
+      val arr = JSONArray()
+      cardNumbers.forEach { arr.put(it) }
+      put("cartelas", arr)
+      put("ts", System.currentTimeMillis())
+    }
+    val requestBody = json.toString().toRequestBody(jsonMediaType)
+    val request = Request.Builder().url(url).put(requestBody).build()
+    return try {
+      httpClient.newCall(request).execute().use { it.isSuccessful }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  fun fetchSessionPlayerCount(sessionId: String): Int {
+    val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/players.json"
+    val request = Request.Builder().url(url).get().build()
+    return try {
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) return 1
+        val body = response.body?.string() ?: return 1
+        if (body == "null" || body.isBlank()) return 1
+        val root = JSONObject(body)
+        root.length().coerceAtLeast(1)
+      }
+    } catch (_: Exception) {
+      1
+    }
+  }
+
+  fun fetchRoundWinner(sessionId: String, roundNum: Int): WinnerRecord? {
+    val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/round_$roundNum/winner.json"
+    val request = Request.Builder().url(url).get().build()
+    return try {
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) return null
+        val body = response.body?.string() ?: return null
+        if (body == "null" || body.isBlank()) return null
+        val o = JSONObject(body)
+        WinnerRecord(
+          id = o.optString("id", UUID.randomUUID().toString().take(8)),
+          username = o.optString("u", ""),
+          phone = o.optString("phone", ""),
+          slotLabel = o.optString("time", ""),
+          roundNumber = o.optInt("k", roundNum),
+          rewardBirr = o.optInt("reward", 0),
+          cardNum = o.optInt("n", 1),
+          callCount = o.optInt("calls", 0),
+          timestamp = o.optLong("at", System.currentTimeMillis())
+        )
+      }
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  fun postRoundWinner(sessionId: String, roundNum: Int, winner: WinnerRecord): Boolean {
+    val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/round_$roundNum/winner.json"
+    val json = JSONObject().apply {
+      put("id", winner.id)
+      put("u", winner.username)
+      put("phone", winner.phone)
+      put("time", winner.slotLabel)
+      put("k", winner.roundNumber)
+      put("reward", winner.rewardBirr)
+      put("n", winner.cardNum)
+      put("calls", winner.callCount)
+      put("at", winner.timestamp)
+    }
+    val requestBody = json.toString().toRequestBody(jsonMediaType)
+    val request = Request.Builder().url(url).put(requestBody).build()
+    return try {
+      httpClient.newCall(request).execute().use { it.isSuccessful }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
   fun fetchAdminHash(): String? {
     val url = "${FirebaseRtdbConfig.BASE_URL}/admin.json"
     val request = Request.Builder().url(url).get().build()

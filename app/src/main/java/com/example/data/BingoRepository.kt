@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.example.model.ActiveRound
 import com.example.model.AppLanguage
+import com.example.model.BingoGoal
 import com.example.model.CardOwnership
 import com.example.model.GameSlot
 import com.example.model.PaymentRequest
@@ -46,6 +47,7 @@ class BingoRepository(context: Context) {
 
   companion object {
     const val PAY_BIRR = 30
+    const val BIRR_PER_GAME = 10
     const val PRIZE_PERCENTAGE = 0.7
     const val CALL_INTERVAL_MS = 5000L
     const val LEAD_COUNTDOWN_MS = 5000L
@@ -109,12 +111,12 @@ class BingoRepository(context: Context) {
       // 1. Pull all remote users from Firebase RTDB and cache locally
       val remoteUsers = remoteService.fetchAllUsers()
       if (remoteUsers.isNotEmpty()) {
-        val currentNames = getAllUsernamesInternal().toMutableSet()
-        remoteUsers.forEach { (name, user) ->
+        val remoteUsernames = remoteUsers.keys.toSet()
+        saveAllUsernames(remoteUsernames)
+        remoteUsers.forEach { (_, user) ->
           saveUserLocalOnly(user)
-          currentNames.add(name)
         }
-        saveAllUsernames(currentNames)
+        cleanupUnregisteredLocalUsers(remoteUsernames)
       }
 
       // 2. Fetch and merge payment requests
@@ -388,15 +390,6 @@ class BingoRepository(context: Context) {
     return names
   }
 
-  fun getAllUsernames(): Set<String> {
-    val names = getAllUsernamesInternal()
-    if (names.isEmpty()) {
-      seedDefaultAccounts()
-      return getAllUsernamesInternal()
-    }
-    return names
-  }
-
   private fun saveAllUsernames(set: Set<String>) {
     val arr = JSONArray()
     set.forEach { arr.put(it) }
@@ -406,38 +399,49 @@ class BingoRepository(context: Context) {
       .commit()
   }
 
-  private fun seedDefaultAccounts() {
-    val defaultList = listOf(
-      UserProfile(
-        username = "yemane",
-        phone = "0939383425",
-        playingTime = StringsDictionary.SLOTS[0].labelEn, // 4:00 O'clock
-        passwordHash = hashPassword("password123"),
-        walletBalance = 250
-      ),
-      UserProfile(
-        username = "abebe",
-        phone = "0911223344",
-        playingTime = StringsDictionary.SLOTS[1].labelEn, // 6:00 O'clock
-        passwordHash = hashPassword("password123"),
-        walletBalance = 100
-      ),
-      UserProfile(
-        username = "selam",
-        phone = "0922334455",
-        playingTime = StringsDictionary.SLOTS[5].labelEn, // 2:00 O'clock Night
-        passwordHash = hashPassword("password123"),
-        walletBalance = 60
-      ),
-      UserProfile(
-        username = "dawit",
-        phone = "0933445566",
-        playingTime = StringsDictionary.SLOTS[2].labelEn, // 8:00 O'clock
-        passwordHash = hashPassword("password123"),
-        walletBalance = 30
-      )
-    )
-    defaultList.forEach { saveUser(it) }
+  fun getAllUsernames(): Set<String> {
+    return getAllUsernamesInternal()
+  }
+
+  fun cleanupUnregisteredLocalUsers(validUsernames: Set<String>) {
+    try {
+      val allKeys = prefs.all.keys.toList()
+      val editor = prefs.edit()
+      var changed = false
+      for (key in allKeys) {
+        if (key.startsWith("user_")) {
+          val username = key.removePrefix("user_")
+          if (!validUsernames.contains(username)) {
+            editor.remove(key)
+            changed = true
+          }
+        }
+      }
+      if (changed) {
+        editor.commit()
+      }
+
+      synchronized(usersBackupFile) {
+        val backup = readBackupFile()
+        val keys = backup.keys()
+        val toRemove = mutableListOf<String>()
+        while (keys.hasNext()) {
+          val k = keys.next()
+          if (!validUsernames.contains(k)) {
+            toRemove.add(k)
+          }
+        }
+        if (toRemove.isNotEmpty()) {
+          toRemove.forEach { backup.remove(it) }
+          writeBackupFile(backup)
+        }
+      }
+
+      val currentSession = getCurrentSession()
+      if (currentSession != null && !validUsernames.contains(currentSession)) {
+        setCurrentSession(null)
+      }
+    } catch (_: Exception) {}
   }
 
   fun hashPassword(password: String): String {
@@ -698,19 +702,32 @@ class BingoRepository(context: Context) {
 
   data class SlotInfo(
     val slot: GameSlot,
+    val sessionId: String,
     val startTime: Long,
     val rounds: List<ActiveRound>,
     val sessionEndTime: Long
   )
 
+  fun getCanonicalRoundSeed(slotHour: Int, dayIndex: Long, roundNum: Int): Long {
+    return (dayIndex * 100000L + slotHour * 1000L + roundNum)
+  }
+
+  fun getCanonicalRoundGoal(slotHour: Int, dayIndex: Long, roundNum: Int): BingoGoal {
+    val seed = getCanonicalRoundSeed(slotHour, dayIndex, roundNum)
+    val index = ((seed % StringsDictionary.ALL_GOALS.size + StringsDictionary.ALL_GOALS.size) % StringsDictionary.ALL_GOALS.size).toInt()
+    return StringsDictionary.ALL_GOALS[index]
+  }
+
   fun getSlotInfo(dayOffset: Int, slot: GameSlot): SlotInfo {
     val start = getSlotStartTime(dayOffset, slot.hourUtc)
+    val dayIndex = getEthiopianDayIndex(start)
+    val sessionId = "session_${slot.hourUtc}_d$dayIndex"
     val rounds = mutableListOf<ActiveRound>()
     var roundStart = start
     for (k in 1..ROUNDS_PER_SESSION) {
       val roundDuration = LEAD_COUNTDOWN_MS + 75 * CALL_INTERVAL_MS // ~380s
       val roundEnd = roundStart + roundDuration
-      val roundId = "slot_${slot.hourUtc}_d${getEthiopianDayIndex(start)}_r$k"
+      val roundId = "slot_${slot.hourUtc}_d${dayIndex}_r$k"
       rounds.add(
         ActiveRound(
           roundNumber = k,
@@ -723,7 +740,7 @@ class BingoRepository(context: Context) {
       roundStart = roundEnd + ROUND_BREAK_MS
     }
     val sessionEnd = rounds.last().endTime
-    return SlotInfo(slot, start, rounds, sessionEnd)
+    return SlotInfo(slot, sessionId, start, rounds, sessionEnd)
   }
 
   fun getNextSlot(targetLabel: String? = null): SlotInfo {
@@ -755,5 +772,41 @@ class BingoRepository(context: Context) {
       }
     }
     return null
+  }
+
+  fun getOccupiedCartelas(sessionId: String): Map<Int, String> {
+    val raw = prefs.getString("occupied_cartelas_$sessionId", null) ?: return emptyMap()
+    val map = mutableMapOf<Int, String>()
+    try {
+      val obj = JSONObject(raw)
+      val keys = obj.keys()
+      while (keys.hasNext()) {
+        val k = keys.next()
+        val num = k.toIntOrNull() ?: continue
+        map[num] = obj.optString(k, "")
+      }
+    } catch (_: Exception) {}
+    return map
+  }
+
+  fun saveOccupiedCartelas(sessionId: String, map: Map<Int, String>) {
+    try {
+      val obj = JSONObject()
+      map.forEach { (num, owner) ->
+        obj.put(num.toString(), owner)
+      }
+      prefs.edit().putString("occupied_cartelas_$sessionId", obj.toString()).apply()
+    } catch (_: Exception) {}
+  }
+
+  fun claimCartelas(sessionId: String, username: String, cardNumbers: List<Int>) {
+    val current = getOccupiedCartelas(sessionId).toMutableMap()
+    cardNumbers.forEach { current[it] = username }
+    saveOccupiedCartelas(sessionId, current)
+    ioScope.launch {
+      try {
+        remoteService.claimSessionCartelas(sessionId, username, cardNumbers)
+      } catch (_: Exception) {}
+    }
   }
 }

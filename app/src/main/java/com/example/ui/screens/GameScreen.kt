@@ -108,6 +108,7 @@ fun GameScreen(
   showConfetti: Boolean,
   winnerCardNum: Int?,
   winnerCallsCount: Int?,
+  winnerNotice: String? = null,
   currentRoundNumber: Int = 1,
   totalSessionRounds: Int = 3,
   isIntermission: Boolean = false,
@@ -201,9 +202,9 @@ fun GameScreen(
           Text(
             text = if (activeRound != null) {
               when (language) {
-                AppLanguage.EN -> "Game $currentRoundNumber of $totalSessionRounds"
-                AppLanguage.AM -> "ጨዋታ $currentRoundNumber ከ $totalSessionRounds"
-                AppLanguage.TI -> "ጸወታ $currentRoundNumber ካብ $totalSessionRounds"
+                AppLanguage.EN -> "Game $currentRoundNumber of $totalSessionRounds (10 Birr/game)"
+                AppLanguage.AM -> "ጨዋታ $currentRoundNumber ከ $totalSessionRounds (በአንድ ጨዋታ 10 ብር)"
+                AppLanguage.TI -> "ጸወታ $currentRoundNumber ካብ $totalSessionRounds (ኣብ ሓደ ጸወታ 10 ብር)"
               }
             } else {
               when (language) {
@@ -236,6 +237,30 @@ fun GameScreen(
             color = BingoGold,
             fontWeight = FontWeight.Bold,
             fontSize = 16.sp
+          )
+        }
+      }
+
+      // Remote Winner Alert Banner
+      if (!winnerNotice.isNullOrBlank()) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Card(
+          shape = RoundedCornerShape(12.dp),
+          colors = CardDefaults.cardColors(containerColor = BingoGold.copy(alpha = 0.2f)),
+          border = androidx.compose.foundation.BorderStroke(1.5.dp, BingoGold),
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("remote_winner_banner")
+        ) {
+          Text(
+            text = "🏆 $winnerNotice",
+            color = BingoGoldLight,
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(10.dp)
           )
         }
       }

@@ -19,11 +19,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -42,6 +45,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -80,6 +84,7 @@ fun HomeScreen(
 ) {
   var usernameInput by remember { mutableStateOf("") }
   var passwordInput by remember { mutableStateOf("") }
+  var passwordVisible by remember { mutableStateOf(false) }
 
   val notificationText = when (language) {
     AppLanguage.EN -> "ⓘ BINGO game begins right after the countdown. Choose your cartelas and join!"
@@ -289,7 +294,19 @@ fun HomeScreen(
               )
             },
             singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
+            trailingIcon = {
+              IconButton(
+                onClick = { passwordVisible = !passwordVisible },
+                modifier = Modifier.testTag("home_password_visibility_toggle")
+              ) {
+                Icon(
+                  imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                  contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                  tint = BingoGoldLight
+                )
+              }
+            },
+            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier
               .fillMaxWidth()

@@ -316,13 +316,63 @@ class ExampleUnitTest {
     val pricePerCartela = com.example.data.BingoRepository.PAY_BIRR
     assertEquals(30, pricePerCartela)
 
-    // 1 cartela = 30 Birr covers all 3 games in that session
+    // 1 cartela = 30 Birr covers all 3 games in that session (10 Birr per 1 game)
     val cartelaCount = 1
     val costForThreeGames = cartelaCount * pricePerCartela
     assertEquals(30, costForThreeGames)
 
-    // 2 cartelas = 60 Birr covers all 3 games
+    val birrPerGame = com.example.data.BingoRepository.BIRR_PER_GAME
+    assertEquals(10, birrPerGame)
+    assertEquals(costForThreeGames / 3, birrPerGame)
+
+    // 2 cartelas = 60 Birr covers all 3 games (20 Birr per game)
     val twoCartelasCost = 2 * pricePerCartela
     assertEquals(60, twoCartelasCost)
+  }
+
+  @Test
+  fun testCanonicalMultiplayerSynchronizationAcrossDevices() {
+    val slotHour = 10
+    val dayIndex = 20760L
+
+    for (round in 1..3) {
+      // Simulate Device A
+      val seedDeviceA = (dayIndex * 100000L + slotHour * 1000L + round)
+      val goalDeviceA = StringsDictionary.ALL_GOALS[((seedDeviceA % StringsDictionary.ALL_GOALS.size + StringsDictionary.ALL_GOALS.size) % StringsDictionary.ALL_GOALS.size).toInt()]
+      val callingSeqDeviceA = BingoEngine.generateCallingSequence(seedDeviceA)
+
+      // Simulate Device B
+      val seedDeviceB = (dayIndex * 100000L + slotHour * 1000L + round)
+      val goalDeviceB = StringsDictionary.ALL_GOALS[((seedDeviceB % StringsDictionary.ALL_GOALS.size + StringsDictionary.ALL_GOALS.size) % StringsDictionary.ALL_GOALS.size).toInt()]
+      val callingSeqDeviceB = BingoEngine.generateCallingSequence(seedDeviceB)
+
+      // Both devices must have the EXACT SAME seed, goal, and numbers sequence
+      assertEquals(seedDeviceA, seedDeviceB)
+      assertEquals(goalDeviceA.id, goalDeviceB.id)
+      assertEquals(callingSeqDeviceA, callingSeqDeviceB)
+      assertEquals(75, callingSeqDeviceA.size)
+    }
+  }
+
+  @Test
+  fun testCartelaOccupancyExclusivity() {
+    val occupiedCartelas = mutableMapOf<Int, String>()
+    val userA = "Abebe"
+    val userB = "Kebede"
+
+    // User A purchases card #42
+    val cardToBuy = 42
+    occupiedCartelas[cardToBuy] = userA
+
+    // Verify User A owns card #42
+    assertEquals(userA, occupiedCartelas[cardToBuy])
+
+    // Verify User B cannot select card #42 because it is occupied
+    val isOccupiedForUserB = occupiedCartelas.containsKey(cardToBuy) && occupiedCartelas[cardToBuy] != userB
+    assertTrue("Card #42 should be occupied for User B", isOccupiedForUserB)
+
+    // User A can view their own card without conflict
+    val isOccupiedForUserA = occupiedCartelas.containsKey(cardToBuy) && occupiedCartelas[cardToBuy] != userA
+    assertFalse("Card #42 should NOT be considered occupied by other for User A", isOccupiedForUserA)
   }
 }

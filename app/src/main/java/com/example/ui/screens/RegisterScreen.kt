@@ -20,11 +20,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -40,6 +43,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AppLanguage
@@ -68,7 +72,9 @@ fun RegisterScreen(
   var phone by remember { mutableStateOf("") }
   var selectedTime by remember { mutableStateOf(StringsDictionary.SLOTS.first().label(language)) }
   var password by remember { mutableStateOf("") }
+  var passwordVisible by remember { mutableStateOf(false) }
   var confirmPassword by remember { mutableStateOf("") }
+  var confirmPasswordVisible by remember { mutableStateOf(false) }
   var timeDropdownExpanded by remember { mutableStateOf(false) }
 
   Column(
@@ -259,7 +265,19 @@ fun RegisterScreen(
             )
           },
           singleLine = true,
-          visualTransformation = PasswordVisualTransformation(),
+          trailingIcon = {
+            IconButton(
+              onClick = { passwordVisible = !passwordVisible },
+              modifier = Modifier.testTag("register_password_visibility_toggle")
+            ) {
+              Icon(
+                imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                tint = BingoGoldLight
+              )
+            }
+          },
+          visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
           modifier = Modifier
             .fillMaxWidth()
@@ -291,7 +309,19 @@ fun RegisterScreen(
             )
           },
           singleLine = true,
-          visualTransformation = PasswordVisualTransformation(),
+          trailingIcon = {
+            IconButton(
+              onClick = { confirmPasswordVisible = !confirmPasswordVisible },
+              modifier = Modifier.testTag("register_confirm_password_visibility_toggle")
+            ) {
+              Icon(
+                imageVector = if (confirmPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                contentDescription = if (confirmPasswordVisible) "Hide password" else "Show password",
+                tint = BingoGoldLight
+              )
+            }
+          },
+          visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
           modifier = Modifier
             .fillMaxWidth()
