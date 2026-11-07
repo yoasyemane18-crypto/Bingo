@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.BingoRepository
 import com.example.engine.BingoEngine
+import com.example.model.ActivityRecord
 import com.example.model.ActiveRound
 import com.example.model.AppLanguage
 import com.example.model.BingoCard
@@ -31,6 +32,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 data class BingoUiState(
@@ -96,6 +98,7 @@ data class BingoUiState(
   val withdrawalRequests: List<WithdrawalRequest> = emptyList(),
   val winnersHistory: List<WinnerRecord> = emptyList(),
   val allUsers: List<UserProfile> = emptyList(),
+  val activitiesHistory: List<ActivityRecord> = emptyList(),
 
   // Alerts
   val toastMessage: String? = null,
@@ -114,6 +117,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
   private var countdownJob: Job? = null
   private var gameLoopJob: Job? = null
   private var intermissionJob: Job? = null
+  private var hasAutoLaunchedForActiveSlot: String? = null
 
   init {
     val lang = repository.getSavedLanguage()
@@ -137,7 +141,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     // Background sync with real Firebase backend server
     viewModelScope.launch(Dispatchers.IO) {
       repository.syncWithRemoteServer()
-      refreshData()
+      refreshData(syncRemote = true)
     }
   }
 
@@ -249,7 +253,8 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         val userSlot = _uiState.value.currentUser?.playingTime
         val nextSlot = repository.getNextSlot(userSlot)
         val activeSession = repository.getActiveSlotSession(userSlot)
-        val now = System.currentTimeMillis()
+        // Use synchronized authoritative server time so all devices have identical countdown
+        val now = repository.getSynchronizedTimeMs()
 
         val isSessionActive = activeSession != null
         val diffMs = if (isSessionActive) 0L else (nextSlot.startTime - now).coerceAtLeast(0L)
@@ -286,9 +291,23 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           }
         }
 
-        // Auto-launch if user reserved cartela and countdown hits 0 while in lobby
-        if (!wasFinished && isFinished && _uiState.value.hasCartelaTicketForSession && _uiState.value.currentScreen == Screen.PLAY_LOBBY) {
-          startScheduledSession()
+        // Periodically resync authoritative server time with Firebase
+        if (tickerTick % 20 == 0) {
+          repository.syncServerTime()
+        }
+
+        if (!isFinished) {
+          hasAutoLaunchedForActiveSlot = null
+        }
+
+        // AUTOMATIC GAME START:
+        // When the countdown finishes (00:00:00), the game starts automatically!
+        // No manual clicking needed! All players on different devices start together!
+        if (isFinished && _uiState.value.currentScreen != Screen.GAME && _uiState.value.currentUser != null) {
+          if (hasAutoLaunchedForActiveSlot != sessionId) {
+            hasAutoLaunchedForActiveSlot = sessionId
+            startScheduledSession()
+          }
         }
 
         delay(1000L)
@@ -351,6 +370,14 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       walletBalance = 0
     )
     repository.saveUser(newUser)
+    viewModelScope.launch(Dispatchers.IO) {
+      repository.remoteService.saveUser(newUser)
+      repository.remoteService.logActivity(
+        type = "USER_REGISTERED",
+        username = newUser.username,
+        description = "New user registered: ${newUser.username} (${newUser.phone}, ${newUser.playingTime})"
+      )
+    }
     repository.setCurrentSession(newUser.username)
     _uiState.update { it.copy(currentUser = newUser) }
     navigateTo(Screen.PLAY_LOBBY)
@@ -488,7 +515,19 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           walletBalance = newBal,
           transactions = user.transactions + tx
         )
-        repository.saveUser(updatedUser)
+        repository.saveUserLocalOnly(updatedUser)
+        // Push immediately to Firebase RTDB
+        viewModelScope.launch(Dispatchers.IO) {
+          repository.remoteService.savePaymentRequest(request)
+          repository.remoteService.saveUser(updatedUser)
+          repository.remoteService.logActivity(
+            type = "DEPOSIT_APPROVED",
+            username = user.username,
+            amountBirr = verification.verifiedAmountBirr,
+            description = "Deposit approved: ${verification.verifiedAmountBirr} Birr by ${user.username} (Tx: ${verification.transactionId})"
+          )
+        }
+
         _uiState.update { it.copy(currentUser = updatedUser) }
         refreshData()
 
@@ -512,6 +551,16 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           status = RequestStatus.DECLINED
         )
         repository.addPaymentRequest(declinedRequest)
+        // Push declined payment to Firebase RTDB
+        viewModelScope.launch(Dispatchers.IO) {
+          repository.remoteService.savePaymentRequest(declinedRequest)
+          repository.remoteService.logActivity(
+            type = "DEPOSIT_DECLINED",
+            username = user.username,
+            amountBirr = amountBirr,
+            description = "Deposit declined: $amountBirr Birr for ${user.username} (${verification.message})"
+          )
+        }
         refreshData()
 
         showAlert(
@@ -537,31 +586,48 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       return
     }
 
-    // Deduct immediately from wallet
-    val newBal = user.walletBalance - amountBirr
-    val tx = WalletTransaction(
-      id = UUID.randomUUID().toString(),
-      label = "Withdrawal to $account",
-      amount = -amountBirr
-    )
-    val updatedUser = user.copy(
-      walletBalance = newBal,
-      transactions = user.transactions + tx
-    )
-    repository.saveUser(updatedUser)
+    viewModelScope.launch(Dispatchers.IO) {
+      // Deduct immediately from wallet
+      val newBal = user.walletBalance - amountBirr
+      val tx = WalletTransaction(
+        id = UUID.randomUUID().toString(),
+        label = "Withdrawal to $account: -$amountBirr Birr",
+        amount = -amountBirr,
+        timestamp = System.currentTimeMillis()
+      )
+      val updatedUser = user.copy(
+        walletBalance = newBal,
+        transactions = user.transactions + tx
+      )
+      repository.saveUserLocalOnly(updatedUser)
+      // Send directly to Firebase RTDB immediately
+      repository.remoteService.saveUser(updatedUser)
 
-    val req = WithdrawalRequest(
-      id = UUID.randomUUID().toString().take(8),
-      username = user.username,
-      phone = user.phone,
-      amountBirr = amountBirr,
-      telebirrAccount = account
-    )
-    repository.addWithdrawalRequest(req)
+      val req = WithdrawalRequest(
+        id = UUID.randomUUID().toString().take(8),
+        username = user.username,
+        phone = user.phone,
+        amountBirr = amountBirr,
+        telebirrAccount = account,
+        timestamp = System.currentTimeMillis()
+      )
+      repository.addWithdrawalRequest(req)
+      // Send directly to Firebase RTDB immediately
+      repository.remoteService.saveWithdrawalRequest(req)
+      repository.remoteService.logActivity(
+        type = "WITHDRAWAL_REQUEST",
+        username = user.username,
+        amountBirr = amountBirr,
+        description = "Withdrawal requested: $amountBirr Birr to $account by ${user.username}",
+        extra = account
+      )
 
-    _uiState.update { it.copy(currentUser = updatedUser) }
-    refreshData()
-    showAlert("✔ Withdrawal requested. The admin will send $amountBirr birr to $account.")
+      withContext(Dispatchers.Main) {
+        _uiState.update { it.copy(currentUser = updatedUser) }
+        refreshData(syncRemote = true)
+        showAlert("✔ Withdrawal requested. The admin will send $amountBirr birr to $account.")
+      }
+    }
   }
 
   // --- Telebirr Payment Gateway Flow ---
@@ -641,7 +707,18 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           walletBalance = newBal,
           transactions = user.transactions + tx
         )
-        repository.saveUser(updatedUser)
+        repository.saveUserLocalOnly(updatedUser)
+        // Push immediately to Firebase RTDB
+        viewModelScope.launch(Dispatchers.IO) {
+          repository.remoteService.savePaymentRequest(request)
+          repository.remoteService.saveUser(updatedUser)
+          repository.remoteService.logActivity(
+            type = "DEPOSIT_APPROVED",
+            username = user.username,
+            amountBirr = verification.verifiedAmountBirr,
+            description = "Telebirr Gateway: ${verification.verifiedAmountBirr} Birr deposited by ${user.username} (Tx: ${verification.transactionId})"
+          )
+        }
 
         _uiState.update {
           it.copy(
@@ -726,7 +803,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     val userSlot = user.playingTime
     val nextSlot = repository.getNextSlot(userSlot)
     val activeSession = repository.getActiveSlotSession(userSlot)
-    val now = System.currentTimeMillis()
+    val now = repository.getSynchronizedTimeMs()
     val isSessionActive = activeSession != null
     val diffMs = if (isSessionActive) 0L else (nextSlot.startTime - now).coerceAtLeast(0L)
     val isCountdownFinished = isSessionActive || diffMs == 0L
@@ -777,10 +854,18 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       )
       repository.saveUser(updatedUser)
 
-      // Register player and claim cartelas in the shared session
+      // Register player and claim cartelas in the shared session on Firebase RTDB
       repository.claimCartelas(sessionId, user.username, selected)
       viewModelScope.launch(Dispatchers.IO) {
-        repository.remoteService.registerPlayerInSession(sessionId, user.username, selected)
+        repository.remoteService.saveUser(updatedUser)
+        repository.remoteService.registerPlayerInSession(sessionId, user.username, selected.size)
+        repository.remoteService.claimSessionCartelas(sessionId, user.username, selected)
+        repository.remoteService.logActivity(
+          type = "CARTELA_PURCHASED",
+          username = user.username,
+          amountBirr = cost,
+          description = "${user.username} purchased ${selected.size} cartela(s) #${selected.joinToString(",")} for $cost Birr"
+        )
       }
       val updatedOccupied = _uiState.value.occupiedCartelas.toMutableMap()
       selected.forEach { updatedOccupied[it] = user.username }
@@ -819,12 +904,53 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     val user = _uiState.value.currentUser ?: return
     val selected = if (_uiState.value.ticketCards.isNotEmpty()) {
       _uiState.value.ticketCards
-    } else {
+    } else if (_uiState.value.selectedCardsList.isNotEmpty()) {
       _uiState.value.selectedCardsList.sorted()
+    } else {
+      listOf(_uiState.value.selectedCardNumber.coerceIn(1, 500))
     }
     val slot = StringsDictionary.findSlot(user.playingTime) ?: StringsDictionary.SLOTS.first()
     val slotInfo = repository.getActiveSlotSession(user.playingTime) ?: repository.getNextSlot(user.playingTime)
     val sessionId = slotInfo.sessionId
+
+    // If user hasn't manually purchased ticket before countdown reached 00:00:00:
+    // Auto-enroll their selected cartela using wallet balance so they start with other players automatically
+    if (!_uiState.value.hasCartelaTicketForSession) {
+      val cost = selected.size * BingoRepository.PAY_BIRR
+      if (user.walletBalance >= cost) {
+        val newBal = user.walletBalance - cost
+        val tx = WalletTransaction(
+          id = UUID.randomUUID().toString(),
+          label = "Cartela ×${selected.size} for 3 Games (10 Birr/game - ${user.playingTime})",
+          amount = -cost
+        )
+        val updatedUser = user.copy(
+          walletBalance = newBal,
+          transactions = user.transactions + tx
+        )
+        repository.saveUser(updatedUser)
+        repository.claimCartelas(sessionId, user.username, selected)
+        viewModelScope.launch(Dispatchers.IO) {
+          repository.remoteService.saveUser(updatedUser)
+          repository.remoteService.claimSessionCartelas(sessionId, user.username, selected)
+          repository.remoteService.registerPlayerInSession(sessionId, user.username, selected.size)
+          repository.remoteService.logActivity(
+            type = "CARTELA_PURCHASED",
+            username = user.username,
+            amountBirr = cost,
+            description = "${user.username} auto-enrolled ${selected.size} cartela(s) #${selected.joinToString(",")} for $cost Birr"
+          )
+        }
+        _uiState.update {
+          it.copy(
+            currentUser = updatedUser,
+            hasCartelaTicketForSession = true,
+            ticketCards = selected
+          )
+        }
+      }
+    }
+
     val cards = selected.map { cardNum ->
       BingoEngine.generateCard(cardNum, _uiState.value.cardSeed)
     }
@@ -841,9 +967,10 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     val roundCost = selected.size * BingoRepository.BIRR_PER_GAME * players
     val roundPrize = (roundCost * BingoRepository.PRIZE_PERCENTAGE).toInt().coerceAtLeast(20)
     val slotLabel = user.playingTime
+    val synchedNow = repository.getSynchronizedTimeMs()
 
     val firstRound = slotInfo.rounds.firstOrNull() ?: ActiveRound(
-      1, "r1", System.currentTimeMillis(), System.currentTimeMillis() + 400000L, slotLabel
+      1, "r1", synchedNow, synchedNow + 400000L, slotLabel
     )
 
     _uiState.update {
@@ -1197,11 +1324,21 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       )
       repository.addWinner(winnerRecord)
 
-      // Post round winner to Firebase so all other devices in the session detect it!
-      if (sessionId != null) {
-        viewModelScope.launch(Dispatchers.IO) {
-          repository.remoteService.postRoundWinner(sessionId, currentRound, winnerRecord)
-        }
+      // Post round winner, winner wallet, and activity directly to Firebase RTDB immediately
+      viewModelScope.launch(Dispatchers.IO) {
+        try {
+          repository.remoteService.saveWinner(winnerRecord)
+          repository.remoteService.saveUser(updatedUser)
+          if (sessionId != null) {
+            repository.remoteService.postRoundWinner(sessionId, currentRound, winnerRecord)
+          }
+          repository.remoteService.logActivity(
+            type = "PLAYER_WIN",
+            username = user.username,
+            amountBirr = reward,
+            description = "${user.username} won Round $currentRound (Card #${winningCard.cardNum}) - Reward: $reward Birr"
+          )
+        } catch (_: Exception) {}
       }
 
       _uiState.update {
@@ -1222,6 +1359,17 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         showWinDialog = true,
         showConfetti = true
       )
+    }
+
+    // Automatically advance to intermission countdown after 3s celebration without requiring manual click
+    viewModelScope.launch {
+      delay(3000L)
+      _uiState.update { it.copy(showWinDialog = false) }
+      if (!_uiState.value.isPracticeMode && currentRound < 3) {
+        startIntermissionToNextRound()
+      } else if (!_uiState.value.isPracticeMode && currentRound >= 3) {
+        completeSession()
+      }
     }
   }
 
@@ -1277,110 +1425,198 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   fun adminApprovePayment(requestId: String, approvedAmount: Int) {
-    val list = repository.getPaymentRequests().toMutableList()
-    val idx = list.indexOfFirst { it.id == requestId }
-    if (idx < 0) return
-    val req = list[idx]
-    list[idx] = req.copy(status = RequestStatus.APPROVED, amountBirr = approvedAmount)
-    repository.savePaymentRequests(list)
+    viewModelScope.launch(Dispatchers.IO) {
+      val list = repository.getPaymentRequests().toMutableList()
+      val idx = list.indexOfFirst { it.id == requestId }
+      if (idx < 0) return@launch
+      val req = list[idx]
+      val updatedReq = req.copy(status = RequestStatus.APPROVED, amountBirr = approvedAmount)
+      list[idx] = updatedReq
+      repository.savePaymentRequests(list)
+      // Send directly to Firebase RTDB immediately
+      repository.remoteService.savePaymentRequest(updatedReq)
+      repository.remoteService.logActivity(
+        type = "ADMIN_PAYMENT_APPROVED",
+        username = req.username,
+        amountBirr = approvedAmount,
+        description = "Admin approved payment $requestId (+${approvedAmount} Birr to ${req.username})"
+      )
 
-    // Credit user's wallet
-    val targetUser = repository.getUser(req.username)
-    if (targetUser != null) {
-      val newBal = targetUser.walletBalance + approvedAmount
-      val tx = WalletTransaction(
-        id = UUID.randomUUID().toString(),
-        label = "Top-up approved",
-        amount = approvedAmount
-      )
-      val updated = targetUser.copy(
-        walletBalance = newBal,
-        transactions = targetUser.transactions + tx
-      )
-      repository.saveUser(updated)
-      if (_uiState.value.currentUser?.username == req.username) {
-        _uiState.update { it.copy(currentUser = updated) }
+      // Credit user's wallet
+      val targetUser = repository.getUser(req.username) ?: repository.fetchRemoteUserBlocking(req.username)
+      if (targetUser != null) {
+        val newBal = targetUser.walletBalance + approvedAmount
+        val tx = WalletTransaction(
+          id = UUID.randomUUID().toString(),
+          label = "Top-up approved: +$approvedAmount Birr",
+          amount = approvedAmount,
+          timestamp = System.currentTimeMillis()
+        )
+        val updated = targetUser.copy(
+          walletBalance = newBal,
+          transactions = targetUser.transactions + tx
+        )
+        repository.saveUserLocalOnly(updated)
+        // Send directly to Firebase RTDB immediately
+        repository.remoteService.saveUser(updated)
+        withContext(Dispatchers.Main) {
+          if (_uiState.value.currentUser?.username == req.username) {
+            _uiState.update { it.copy(currentUser = updated) }
+          }
+        }
+      }
+      withContext(Dispatchers.Main) {
+        refreshData(syncRemote = true)
+        showToast("Payment approved: $approvedAmount birr credited to ${req.username}")
       }
     }
-    refreshData()
-    showToast("Payment approved: $approvedAmount birr credited to ${req.username}")
   }
 
   fun adminDeclinePayment(requestId: String) {
-    val list = repository.getPaymentRequests().toMutableList()
-    val idx = list.indexOfFirst { it.id == requestId }
-    if (idx < 0) return
-    list[idx] = list[idx].copy(status = RequestStatus.DECLINED)
-    repository.savePaymentRequests(list)
-    refreshData()
-    showToast("Payment declined.")
+    viewModelScope.launch(Dispatchers.IO) {
+      val list = repository.getPaymentRequests().toMutableList()
+      val idx = list.indexOfFirst { it.id == requestId }
+      if (idx < 0) return@launch
+      val updatedReq = list[idx].copy(status = RequestStatus.DECLINED)
+      list[idx] = updatedReq
+      repository.savePaymentRequests(list)
+      // Send directly to Firebase RTDB immediately
+      repository.remoteService.savePaymentRequest(updatedReq)
+      repository.remoteService.logActivity(
+        type = "ADMIN_PAYMENT_DECLINED",
+        username = updatedReq.username,
+        amountBirr = updatedReq.amountBirr,
+        description = "Admin declined payment $requestId (${updatedReq.username})"
+      )
+      withContext(Dispatchers.Main) {
+        refreshData(syncRemote = true)
+        showToast("Payment declined.")
+      }
+    }
   }
 
   fun adminApproveWithdrawal(requestId: String) {
-    val list = repository.getWithdrawalRequests().toMutableList()
-    val idx = list.indexOfFirst { it.id == requestId }
-    if (idx < 0) return
-    list[idx] = list[idx].copy(status = RequestStatus.APPROVED)
-    repository.saveWithdrawalRequests(list)
-    refreshData()
-    showToast("Withdrawal marked as paid.")
+    viewModelScope.launch(Dispatchers.IO) {
+      val list = repository.getWithdrawalRequests().toMutableList()
+      val idx = list.indexOfFirst { it.id == requestId }
+      if (idx < 0) return@launch
+      val updatedWd = list[idx].copy(status = RequestStatus.APPROVED)
+      list[idx] = updatedWd
+      repository.saveWithdrawalRequests(list)
+      // Send directly to Firebase RTDB immediately
+      repository.remoteService.saveWithdrawalRequest(updatedWd)
+      repository.remoteService.logActivity(
+        type = "ADMIN_WITHDRAWAL_APPROVED",
+        username = updatedWd.username,
+        amountBirr = updatedWd.amountBirr,
+        description = "Admin approved withdrawal $requestId (${updatedWd.amountBirr} Birr to ${updatedWd.telebirrAccount})",
+        extra = updatedWd.telebirrAccount
+      )
+      withContext(Dispatchers.Main) {
+        refreshData(syncRemote = true)
+        showToast("Withdrawal marked as paid.")
+      }
+    }
   }
 
   fun adminDeclineWithdrawal(requestId: String) {
-    val list = repository.getWithdrawalRequests().toMutableList()
-    val idx = list.indexOfFirst { it.id == requestId }
-    if (idx < 0) return
-    val req = list[idx]
-    list[idx] = req.copy(status = RequestStatus.DECLINED)
-    repository.saveWithdrawalRequests(list)
+    viewModelScope.launch(Dispatchers.IO) {
+      val list = repository.getWithdrawalRequests().toMutableList()
+      val idx = list.indexOfFirst { it.id == requestId }
+      if (idx < 0) return@launch
+      val req = list[idx]
+      val updatedWd = req.copy(status = RequestStatus.DECLINED)
+      list[idx] = updatedWd
+      repository.saveWithdrawalRequests(list)
+      // Send directly to Firebase RTDB immediately
+      repository.remoteService.saveWithdrawalRequest(updatedWd)
+      repository.remoteService.logActivity(
+        type = "ADMIN_WITHDRAWAL_DECLINED",
+        username = req.username,
+        amountBirr = req.amountBirr,
+        description = "Admin declined withdrawal $requestId and refunded ${req.amountBirr} Birr to ${req.username}"
+      )
 
-    // Refund user
-    val targetUser = repository.getUser(req.username)
-    if (targetUser != null) {
-      val newBal = targetUser.walletBalance + req.amountBirr
+      // Refund user
+      val targetUser = repository.getUser(req.username) ?: repository.fetchRemoteUserBlocking(req.username)
+      if (targetUser != null) {
+        val newBal = targetUser.walletBalance + req.amountBirr
+        val tx = WalletTransaction(
+          id = UUID.randomUUID().toString(),
+          label = "Withdrawal refund: +${req.amountBirr} Birr",
+          amount = req.amountBirr,
+          timestamp = System.currentTimeMillis()
+        )
+        val updated = targetUser.copy(
+          walletBalance = newBal,
+          transactions = targetUser.transactions + tx
+        )
+        repository.saveUserLocalOnly(updated)
+        // Send directly to Firebase RTDB immediately
+        repository.remoteService.saveUser(updated)
+        withContext(Dispatchers.Main) {
+          if (_uiState.value.currentUser?.username == req.username) {
+            _uiState.update { it.copy(currentUser = updated) }
+          }
+        }
+      }
+      withContext(Dispatchers.Main) {
+        refreshData(syncRemote = true)
+        showToast("Withdrawal declined and ${req.amountBirr} birr refunded.")
+      }
+    }
+  }
+
+  fun adminAdjustUserBalance(username: String, deltaBirr: Int) {
+    viewModelScope.launch(Dispatchers.IO) {
+      val targetUser = repository.getUser(username) ?: repository.fetchRemoteUserBlocking(username) ?: return@launch
+      val newBal = (targetUser.walletBalance + deltaBirr).coerceAtLeast(0)
+      val label = if (deltaBirr > 0) "Admin credit: +$deltaBirr Birr" else "Admin deduction: $deltaBirr Birr"
       val tx = WalletTransaction(
         id = UUID.randomUUID().toString(),
-        label = "Withdrawal refund",
-        amount = req.amountBirr
+        label = label,
+        amount = deltaBirr,
+        timestamp = System.currentTimeMillis()
       )
       val updated = targetUser.copy(
         walletBalance = newBal,
         transactions = targetUser.transactions + tx
       )
-      repository.saveUser(updated)
-      if (_uiState.value.currentUser?.username == req.username) {
-        _uiState.update { it.copy(currentUser = updated) }
+      repository.saveUserLocalOnly(updated)
+      // Send directly to Firebase RTDB immediately
+      repository.remoteService.saveUser(updated)
+      repository.remoteService.logActivity(
+        type = if (deltaBirr > 0) "ADMIN_ADD_FUNDS" else "ADMIN_DEDUCT_FUNDS",
+        username = username,
+        amountBirr = deltaBirr,
+        description = "Admin adjusted balance for $username: ${if (deltaBirr > 0) "+$deltaBirr" else "$deltaBirr"} Birr (New Balance: $newBal Birr)"
+      )
+      withContext(Dispatchers.Main) {
+        if (_uiState.value.currentUser?.username == username) {
+          _uiState.update { it.copy(currentUser = updated) }
+        }
+        refreshData(syncRemote = true)
+        showToast("Balance updated for $username: $newBal birr")
       }
     }
-    refreshData()
-    showToast("Withdrawal declined and ${req.amountBirr} birr refunded.")
-  }
-
-  fun adminAdjustUserBalance(username: String, deltaBirr: Int) {
-    val targetUser = repository.getUser(username) ?: return
-    val newBal = (targetUser.walletBalance + deltaBirr).coerceAtLeast(0)
-    val label = if (deltaBirr > 0) "Admin credit" else "Admin deduction"
-    val tx = WalletTransaction(
-      id = UUID.randomUUID().toString(),
-      label = label,
-      amount = deltaBirr
-    )
-    val updated = targetUser.copy(
-      walletBalance = newBal,
-      transactions = targetUser.transactions + tx
-    )
-    repository.saveUser(updated)
-    if (_uiState.value.currentUser?.username == username) {
-      _uiState.update { it.copy(currentUser = updated) }
-    }
-    refreshData()
-    showToast("Balance updated for $username: $newBal birr")
   }
 
   fun adminDeleteUser(username: String) {
-    repository.deleteUser(username)
-    refreshData()
-    showToast("User $username deleted.")
+    viewModelScope.launch(Dispatchers.IO) {
+      repository.deleteUser(username)
+      // Delete directly from Firebase RTDB immediately
+      repository.remoteService.deleteUser(username)
+      repository.remoteService.logActivity(
+        type = "ADMIN_DELETE_USER",
+        username = username,
+        amountBirr = 0,
+        description = "Admin deleted user $username"
+      )
+      withContext(Dispatchers.Main) {
+        refreshData(syncRemote = true)
+        showToast("User $username deleted.")
+      }
+    }
   }
 
   fun refreshData(syncRemote: Boolean = false) {
@@ -1389,13 +1625,15 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         repository.syncWithRemoteServer()
         val currentSessionName = repository.getCurrentSession()
         val user = currentSessionName?.let { repository.getUser(it) }
+        val activities = try { repository.remoteService.fetchActivities() } catch (_: Exception) { emptyList() }
         _uiState.update {
           it.copy(
             currentUser = user,
             paymentRequests = repository.getPaymentRequests(),
             withdrawalRequests = repository.getWithdrawalRequests(),
             winnersHistory = repository.getWinners(),
-            allUsers = repository.getAllUsernames().mapNotNull { name -> repository.getUser(name) }
+            allUsers = repository.getAllUsernames().mapNotNull { name -> repository.getUser(name) },
+            activitiesHistory = activities.ifEmpty { it.activitiesHistory }
           )
         }
       }

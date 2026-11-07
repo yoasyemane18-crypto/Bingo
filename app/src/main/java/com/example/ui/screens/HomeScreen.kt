@@ -202,6 +202,19 @@ fun HomeScreen(
             isGold = false,
             testTag = "home_play_now_button"
           )
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          Text(
+            text = when (language) {
+              AppLanguage.EN -> "⚡ Game starts automatically at 00:00:00 for all players"
+              AppLanguage.AM -> "⚡ ቆጣሪው 00:00:00 ሲደርስ ጨዋታው ለሁሉም ተጫዋቾች ራሱ ይጀምራል"
+              AppLanguage.TI -> "⚡ ቆጻሪ 00:00:00 ምስ በጽሐ ጸወታ ንኹሎም ተጻወትቲ ባዕሉ ይጅምር"
+            },
+            color = BingoGoldLight,
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center
+          )
         }
       }
     } else {

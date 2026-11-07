@@ -726,25 +726,43 @@ fun GameScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            Button(
-              onClick = onSkipIntermission,
+            Surface(
               shape = RoundedCornerShape(50.dp),
-              colors = ButtonDefaults.buttonColors(containerColor = BingoGold),
+              color = BingoPurpleDeep,
+              border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold.copy(alpha = 0.7f)),
               modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
-                .testTag("skip_intermission_button")
+                .testTag("intermission_auto_badge")
             ) {
-              Text(
-                text = when (language) {
-                  AppLanguage.EN -> "▶ Start Game $currentRoundNumber Now"
-                  AppLanguage.AM -> "▶ ጨዋታ $currentRoundNumber አሁኑኑ ጀምር"
-                  AppLanguage.TI -> "▶ ጸወታ $currentRoundNumber ሕጂ ጀምር"
-                },
-                color = BingoTextDark,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp
-              )
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(vertical = 12.dp, horizontal = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+              ) {
+                Text(
+                  text = when (language) {
+                    AppLanguage.EN -> "⚡ Game $currentRoundNumber Starts Automatically in $intermissionSecondsLeft s"
+                    AppLanguage.AM -> "⚡ ጨዋታ $currentRoundNumber በ $intermissionSecondsLeft ሰከንድ ራሱ ይጀምራል"
+                    AppLanguage.TI -> "⚡ ጸወታ $currentRoundNumber ብ $intermissionSecondsLeft ካልኢት ባዕሉ ይጅምር"
+                  },
+                  color = BingoGoldLight,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 15.sp,
+                  textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                  text = when (language) {
+                    AppLanguage.EN -> "All players on different devices start together"
+                    AppLanguage.AM -> "ሁሉም ተጫዋቾች በተመሳሳይ ሰከንድ እኩል ይጀምራሉ"
+                    AppLanguage.TI -> "ኩሎም ተጻወትቲ ብሓደ ግዜ ማዕረ ይጅምሩ"
+                  },
+                  color = BingoTextMuted,
+                  fontSize = 12.sp,
+                  textAlign = TextAlign.Center
+                )
+              }
             }
           }
         }

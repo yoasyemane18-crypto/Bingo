@@ -49,6 +49,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
+import com.example.model.ActivityRecord
 import com.example.model.PaymentRequest
 import com.example.model.RequestStatus
 import com.example.model.UserProfile
@@ -80,6 +81,7 @@ fun AdminScreen(
   withdrawalRequests: List<WithdrawalRequest>,
   allUsers: List<UserProfile>,
   winnersHistory: List<WinnerRecord>,
+  activitiesHistory: List<ActivityRecord> = emptyList(),
   onAdminLogin: (String, String) -> Unit,
   onAdminLogout: () -> Unit,
   onApprovePayment: (String, Int) -> Unit,
@@ -200,6 +202,7 @@ fun AdminScreen(
         "Users (${allUsers.size})",
         "Withdrawals (${pendingWds.size})",
         "Winners",
+        "Live Feed (${activitiesHistory.size})",
         "Logout"
       )
 
@@ -216,7 +219,7 @@ fun AdminScreen(
           Tab(
             selected = selectedTab == index,
             onClick = {
-              if (index == 4) {
+              if (index == 5) {
                 onAdminLogout()
               } else {
                 selectedTab = index
@@ -227,7 +230,7 @@ fun AdminScreen(
                 text = title,
                 fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
                 fontSize = 13.sp,
-                color = if (index == 4) BingoRedLight else if (selectedTab == index) BingoGold else BingoTextWhite
+                color = if (index == 5) BingoRedLight else if (selectedTab == index) BingoGold else BingoTextWhite
               )
             }
           )
@@ -673,6 +676,103 @@ fun AdminScreen(
                     color = BingoTextMuted,
                     fontSize = 12.sp
                   )
+                }
+              }
+            }
+          }
+        }
+
+        // Tab 4: Live Server Activities (Firebase RTDB Realtime Feed)
+        4 -> {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column {
+              Text(
+                text = "Live Activities Feed (${activitiesHistory.size})",
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                color = BingoGoldLight
+              )
+              Text(
+                text = "Real-time sync directly with Firebase Server",
+                color = BingoGreenLight,
+                fontSize = 12.sp
+              )
+            }
+            Button(
+              onClick = onRefreshData,
+              colors = ButtonDefaults.buttonColors(containerColor = BingoGold),
+              shape = RoundedCornerShape(10.dp)
+            ) {
+              Text("Refresh", color = BingoNight, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+          }
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          if (activitiesHistory.isEmpty()) {
+            Text("No server activities logged yet.", color = BingoTextMuted, fontSize = 14.sp)
+          } else {
+            activitiesHistory.forEach { act ->
+              val badgeColor = when (act.type) {
+                "DEPOSIT_REQUEST", "DEPOSIT_APPROVED" -> BingoGreenLight
+                "WITHDRAWAL_REQUEST", "WITHDRAWAL_APPROVED" -> BingoGold
+                "ADMIN_ADJUST", "ADMIN_DECLINE" -> BingoRedLight
+                "WINNER" -> BingoGoldLight
+                "REGISTRATION" -> BingoBorderPurple
+                else -> BingoBorderLight
+              }
+              Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = BingoCardBg),
+                border = androidx.compose.foundation.BorderStroke(1.dp, badgeColor.copy(alpha = 0.5f)),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(vertical = 4.dp)
+              ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Text(
+                      text = act.type.replace('_', ' '),
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 13.sp,
+                      color = badgeColor
+                    )
+                    Text(
+                      text = act.formatTime(),
+                      color = BingoTextMuted,
+                      fontSize = 11.sp
+                    )
+                  }
+                  Spacer(modifier = Modifier.height(4.dp))
+                  Text(
+                    text = "${act.username} · ${act.description}",
+                    color = BingoTextWhite,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                  )
+                  if (act.amountBirr > 0) {
+                    Text(
+                      text = "Amount: ${act.amountBirr} Birr",
+                      color = BingoGold,
+                      fontSize = 13.sp,
+                      fontWeight = FontWeight.SemiBold
+                    )
+                  }
+                  if (act.extra.isNotEmpty()) {
+                    Text(
+                      text = act.extra,
+                      color = BingoTextMuted,
+                      fontSize = 11.sp
+                    )
+                  }
                 }
               }
             }

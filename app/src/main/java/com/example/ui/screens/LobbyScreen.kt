@@ -291,87 +291,6 @@ fun LobbyScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Status Legend: Available / Selected / Occupied (Red Color)
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 2.dp, vertical = 2.dp),
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          // Available
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-          ) {
-            Box(
-              modifier = Modifier
-                .size(12.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(BingoSurface)
-                .border(0.5.dp, BingoBorderLight, RoundedCornerShape(3.dp))
-            )
-            Text(
-              text = when (language) {
-                AppLanguage.EN -> "Available"
-                AppLanguage.AM -> "ክፍት"
-                AppLanguage.TI -> "ክፉት"
-              },
-              color = BingoTextMuted,
-              fontSize = 11.sp
-            )
-          }
-
-          // Selected
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-          ) {
-            Box(
-              modifier = Modifier
-                .size(12.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(BingoGold)
-            )
-            Text(
-              text = when (language) {
-                AppLanguage.EN -> "Selected"
-                AppLanguage.AM -> "የተመረጠ"
-                AppLanguage.TI -> "እተመረጸ"
-              },
-              color = BingoGoldLight,
-              fontSize = 11.sp,
-              fontWeight = FontWeight.SemiBold
-            )
-          }
-
-          // Occupied (Red Color)
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-          ) {
-            Box(
-              modifier = Modifier
-                .size(12.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(BingoRed)
-                .border(0.5.dp, BingoRedLight, RoundedCornerShape(3.dp))
-            )
-            Text(
-              text = when (language) {
-                AppLanguage.EN -> "Occupied (Red)"
-                AppLanguage.AM -> "ተይዟል (ቀይ)"
-                AppLanguage.TI -> "ተታሒዙ (ቀይሕ)"
-              },
-              color = BingoRedLight,
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Bold
-            )
-          }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
         // Grid of 50 numbers (5 rows of 10)
         FlowRow(
           modifier = Modifier.fillMaxWidth(),
@@ -595,9 +514,9 @@ fun LobbyScreen(
         }
       } else if (hasCartelaTicket) {
         when (language) {
-          AppLanguage.EN -> "⏳ Cartela Ready · Starts in $countdownText"
-          AppLanguage.AM -> "⏳ ካርቴላ ተዘጋጅቷል · በ $countdownText ይጀምራል"
-          AppLanguage.TI -> "⏳ ካርቴላ ተዳልዩ · ብ $countdownText ይጅምር"
+          AppLanguage.EN -> "⏳ Cartela Ready · Starts Automatically in $countdownText"
+          AppLanguage.AM -> "⏳ ካርቴላ ተዘጋጅቷል · በ $countdownText ራሱ ይጀምራል"
+          AppLanguage.TI -> "⏳ ካርቴላ ተዳልዩ · ብ $countdownText ባዕሉ ይጅምር"
         }
       } else {
         when (language) {
@@ -626,15 +545,15 @@ fun LobbyScreen(
       Text(
         text = if (isCountdownFinished) {
           when (language) {
-            AppLanguage.EN -> "⏰ Playing Time Active! You will play 3 consecutive games."
-            AppLanguage.AM -> "⏰ የጨዋታ ሰዓት ደርሷል! 3 ተከታታይ ጨዋታዎችን ይጫወታሉ።"
-            AppLanguage.TI -> "⏰ ናይ ጸወታ ሰዓት በጺሑ! 3 ተኸታተልቲ ጸወታታት ክትጻወቱ ኢኹም።"
+            AppLanguage.EN -> "⏰ Playing Time Active! Starting automatically for all players..."
+            AppLanguage.AM -> "⏰ የጨዋታ ሰዓት ደርሷል! ለሁሉም ተጫዋቾች ራሱ እየጀመረ ነው..."
+            AppLanguage.TI -> "⏰ ናይ ጸወታ ሰዓት በጺሑ! ንኹሎም ተጻወትቲ ባዕሉ ይጅምር ኣሎ..."
           }
         } else {
           when (language) {
-            AppLanguage.EN -> "⏰ Playing Time: ${currentUser.playingTime}\nGame starts only when countdown finishes. 3 games in 1 session."
-            AppLanguage.AM -> "⏰ የጨዋታ ሰዓት፡ ${currentUser.playingTime}\nጨዋታው የሚጀምረው ቆጣሪው ሲያልቅ ብቻ ነው። 3 ተከታታይ ጨዋታዎች በአንድ ክፍለ ጊዜ።"
-            AppLanguage.TI -> "⏰ ናይ ጸወታ ሰዓት፡ ${currentUser.playingTime}\nጸወታ ዝጅምር እቲ ቆጻሪ ምስ ወደአ ጥራይ እዩ። 3 ተኸታተልቲ ጸወታታት።"
+            AppLanguage.EN -> "⏰ Playing Time: ${currentUser.playingTime}\nGame starts automatically at 00:00:00. All 3 games played consecutively every 10 seconds."
+            AppLanguage.AM -> "⏰ የጨዋታ ሰዓት፡ ${currentUser.playingTime}\nቆጣሪው 00:00:00 ሲደርስ ጨዋታው ራሱ ይጀምራል። 3ቱም ጨዋታዎች በ10 ሰከንድ ልዩነት ራሳቸው ይቀጥላሉ።"
+            AppLanguage.TI -> "⏰ ናይ ጸወታ ሰዓት፡ ${currentUser.playingTime}\nቆጻሪ 00:00:00 ምስ በጽሐ ጸወታ ባዕሉ ይጅምር። 3ቲኦም ጸወታታት ብ10 ካልኢት ፍልልይ ባዕሎም ይቕጽሉ።"
           }
         },
         color = BingoGoldLight,

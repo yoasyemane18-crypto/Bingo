@@ -37,10 +37,37 @@ class BingoRepository(context: Context) {
   val remoteService = FirebaseRtdbService()
   private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+  @Volatile
+  var serverClockOffset: Long = 0L
+    private set
+
   init {
+    serverClockOffset = prefs.getLong("cached_server_offset", 0L)
+    syncServerTime()
     ioScope.launch {
       try {
         syncWithRemoteServer()
+      } catch (_: Exception) {}
+    }
+  }
+
+  fun setServerClockOffset(offsetMs: Long) {
+    serverClockOffset = offsetMs
+    prefs.edit().putLong("cached_server_offset", offsetMs).apply()
+  }
+
+  fun getSynchronizedTimeMs(): Long {
+    return System.currentTimeMillis() + serverClockOffset
+  }
+
+  fun syncServerTime() {
+    ioScope.launch {
+      try {
+        val serverMs = remoteService.fetchServerTimestamp()
+        if (serverMs != null) {
+          val offset = serverMs - System.currentTimeMillis()
+          setServerClockOffset(offset)
+        }
       } catch (_: Exception) {}
     }
   }
@@ -509,6 +536,18 @@ class BingoRepository(context: Context) {
     val list = getPaymentRequests().toMutableList()
     list.add(p)
     savePaymentRequests(list)
+    ioScope.launch {
+      try {
+        remoteService.savePaymentRequest(p)
+        remoteService.logActivity(
+          type = "PAYMENT_${p.status.name}",
+          username = p.username,
+          amountBirr = p.amountBirr,
+          description = "Payment request ${p.id} (${p.amountBirr} Birr, status: ${p.status.name})",
+          extra = p.receiptId
+        )
+      } catch (_: Exception) {}
+    }
     if (p.status == RequestStatus.APPROVED) {
       recordRedeemedReceipt(
         receiptId = p.receiptId,
@@ -621,6 +660,18 @@ class BingoRepository(context: Context) {
     val list = getWithdrawalRequests().toMutableList()
     list.add(w)
     saveWithdrawalRequests(list)
+    ioScope.launch {
+      try {
+        remoteService.saveWithdrawalRequest(w)
+        remoteService.logActivity(
+          type = "WITHDRAWAL_${w.status.name}",
+          username = w.username,
+          amountBirr = w.amountBirr,
+          description = "Withdrawal request ${w.id} (${w.amountBirr} Birr to ${w.telebirrAccount})",
+          extra = w.telebirrAccount
+        )
+      } catch (_: Exception) {}
+    }
   }
 
   // --- Winners History (Last 24h) ---
@@ -676,6 +727,13 @@ class BingoRepository(context: Context) {
     ioScope.launch {
       try {
         remoteService.saveWinner(record)
+        remoteService.logActivity(
+          type = "PLAYER_WIN",
+          username = record.username,
+          amountBirr = record.rewardBirr,
+          description = "Winner: ${record.username} won ${record.rewardBirr} Birr in Round ${record.roundNumber} (Card #${record.cardNum})",
+          extra = record.slotLabel
+        )
       } catch (_: Exception) {}
     }
   }
@@ -683,14 +741,16 @@ class BingoRepository(context: Context) {
   // --- Schedule Calculation (Ethiopian UTC+3 Time) ---
 
   // Ethiopian time day index: (time + 3h) / 24h
-  fun getEthiopianDayIndex(timeMs: Long = System.currentTimeMillis()): Long {
+  fun getEthiopianDayIndex(timeMs: Long = getSynchronizedTimeMs()): Long {
     return (timeMs + 3 * 3600000L) / DAY_MS
   }
 
   // Calculates slot start time in epoch millis for offset day and Ethiopian hour (GMT+3)
+  // Authoritatively calibrated with getSynchronizedTimeMs() so every phone computes the identical second
   fun getSlotStartTime(dayOffset: Int, hour: Int): Long {
     val eatTz = TimeZone.getTimeZone("GMT+3")
     val cal = Calendar.getInstance(eatTz).apply {
+      timeInMillis = getSynchronizedTimeMs()
       add(Calendar.DAY_OF_MONTH, dayOffset)
       set(Calendar.HOUR_OF_DAY, hour)
       set(Calendar.MINUTE, 0)
@@ -745,7 +805,7 @@ class BingoRepository(context: Context) {
 
   fun getNextSlot(targetLabel: String? = null): SlotInfo {
     val targetSlot = StringsDictionary.findSlot(targetLabel)
-    val now = System.currentTimeMillis()
+    val now = getSynchronizedTimeMs()
     for (d in 0..2) {
       for (s in StringsDictionary.SLOTS) {
         if (targetSlot != null && s.hourUtc != targetSlot.hourUtc) continue
@@ -761,7 +821,7 @@ class BingoRepository(context: Context) {
 
   fun getActiveSlotSession(targetLabel: String? = null): SlotInfo? {
     val targetSlot = StringsDictionary.findSlot(targetLabel)
-    val now = System.currentTimeMillis()
+    val now = getSynchronizedTimeMs()
     for (d in -1..1) {
       for (s in StringsDictionary.SLOTS) {
         if (targetSlot != null && s.hourUtc != targetSlot.hourUtc) continue

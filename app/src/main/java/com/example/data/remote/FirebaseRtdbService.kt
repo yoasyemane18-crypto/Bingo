@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import com.example.model.ActivityRecord
 import com.example.model.CardOwnership
 import com.example.model.PaymentRequest
 import com.example.model.RequestStatus
@@ -35,6 +36,25 @@ class FirebaseRtdbService {
     .build()
 
   private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+
+  fun fetchServerTimestamp(): Long? {
+    val url = "${FirebaseRtdbConfig.BASE_URL}/server_time.json"
+    val body = "{\".sv\": \"timestamp\"}".toRequestBody(jsonMediaType)
+    val request = Request.Builder().url(url).put(body).build()
+    return try {
+      val tStart = System.currentTimeMillis()
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) return null
+        val bodyStr = response.body?.string()?.trim() ?: return null
+        val serverMs = bodyStr.toLongOrNull() ?: return null
+        val tEnd = System.currentTimeMillis()
+        val networkLatency = (tEnd - tStart) / 2
+        serverMs + networkLatency
+      }
+    } catch (_: Exception) {
+      null
+    }
+  }
 
   fun fetchAllUsers(): Map<String, UserProfile> {
     val url = "${FirebaseRtdbConfig.BASE_URL}/users.json"
@@ -205,12 +225,18 @@ class FirebaseRtdbService {
     val json = JSONObject()
     json.put("id", p.id)
     json.put("u", p.username)
+    json.put("username", p.username)
     json.put("phone", p.phone)
     json.put("amt", p.amountBirr)
+    json.put("amountBirr", p.amountBirr)
     json.put("rid", p.receiptId)
+    json.put("receiptId", p.receiptId)
     json.put("link", p.receiptLink)
+    json.put("receiptLink", p.receiptLink)
     json.put("ts", p.timestamp)
+    json.put("timestamp", p.timestamp)
     json.put("st", p.status.name.lowercase())
+    json.put("status", p.status.name.lowercase())
 
     val requestBody = json.toString().toRequestBody(jsonMediaType)
     val request = Request.Builder().url(url).put(requestBody).build()
@@ -269,11 +295,16 @@ class FirebaseRtdbService {
     val json = JSONObject()
     json.put("id", w.id)
     json.put("u", w.username)
+    json.put("username", w.username)
     json.put("phone", w.phone)
     json.put("amt", w.amountBirr)
+    json.put("amountBirr", w.amountBirr)
     json.put("acct", w.telebirrAccount)
+    json.put("account", w.telebirrAccount)
     json.put("ts", w.timestamp)
+    json.put("timestamp", w.timestamp)
     json.put("st", w.status.name.lowercase())
+    json.put("status", w.status.name.lowercase())
 
     val requestBody = json.toString().toRequestBody(jsonMediaType)
     val request = Request.Builder().url(url).put(requestBody).build()
@@ -306,14 +337,14 @@ class FirebaseRtdbService {
           list.add(
             WinnerRecord(
               id = o.optString("id", key),
-              username = o.optString("u", ""),
+              username = o.optString("u", o.optString("username", "")),
               phone = o.optString("phone", ""),
-              slotLabel = o.optString("time", o.optString("slot", "")),
-              roundNumber = o.optInt("k", o.optInt("round", 1)),
-              rewardBirr = o.optInt("reward", 0),
+              slotLabel = o.optString("time", o.optString("slot", o.optString("slotLabel", ""))),
+              roundNumber = o.optInt("k", o.optInt("round", o.optInt("roundNumber", 1))),
+              rewardBirr = o.optInt("reward", o.optInt("rewardBirr", 0)),
               cardNum = o.optInt("n", o.optInt("cardNum", 1)),
-              callCount = o.optInt("calls", 0),
-              timestamp = o.optLong("at", o.optLong("ts", System.currentTimeMillis()))
+              callCount = o.optInt("calls", o.optInt("callCount", 0)),
+              timestamp = o.optLong("at", o.optLong("ts", o.optLong("timestamp", System.currentTimeMillis())))
             )
           )
         }
@@ -328,13 +359,20 @@ class FirebaseRtdbService {
     val json = JSONObject()
     json.put("id", w.id)
     json.put("k", w.roundNumber)
+    json.put("roundNumber", w.roundNumber)
     json.put("u", w.username)
+    json.put("username", w.username)
     json.put("phone", w.phone)
     json.put("time", w.slotLabel)
+    json.put("slotLabel", w.slotLabel)
     json.put("n", w.cardNum)
+    json.put("cardNum", w.cardNum)
     json.put("calls", w.callCount)
+    json.put("callCount", w.callCount)
     json.put("reward", w.rewardBirr)
+    json.put("rewardBirr", w.rewardBirr)
     json.put("at", w.timestamp)
+    json.put("timestamp", w.timestamp)
 
     val requestBody = json.toString().toRequestBody(jsonMediaType)
     val request = Request.Builder().url(url).put(requestBody).build()
@@ -506,6 +544,76 @@ class FirebaseRtdbService {
     } catch (_: Exception) {
       return null
     }
+  }
+
+  // --- Real-time Activity Logging to Firebase RTDB ---
+
+  fun logActivity(
+    type: String,
+    username: String,
+    amountBirr: Int = 0,
+    description: String,
+    extra: String = ""
+  ): Boolean {
+    val id = UUID.randomUUID().toString().take(12)
+    val url = "${FirebaseRtdbConfig.BASE_URL}/activities/$id.json"
+    val json = JSONObject()
+    json.put("id", id)
+    json.put("type", type)
+    json.put("u", username)
+    json.put("username", username)
+    json.put("amt", amountBirr)
+    json.put("amountBirr", amountBirr)
+    json.put("desc", description)
+    json.put("description", description)
+    json.put("extra", extra)
+    json.put("ts", System.currentTimeMillis())
+    json.put("timestamp", System.currentTimeMillis())
+
+    val requestBody = json.toString().toRequestBody(jsonMediaType)
+    val request = Request.Builder().url(url).put(requestBody).build()
+
+    return try {
+      httpClient.newCall(request).execute().use { response ->
+        response.isSuccessful
+      }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  fun fetchActivities(): List<ActivityRecord> {
+    val url = "${FirebaseRtdbConfig.BASE_URL}/activities.json?limitToLast=50"
+    val request = Request.Builder().url(url).get().build()
+    val list = mutableListOf<ActivityRecord>()
+
+    try {
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) return emptyList()
+        val body = response.body?.string() ?: return emptyList()
+        if (body == "null" || body.isBlank()) return emptyList()
+
+        val root = JSONObject(body)
+        val keys = root.keys()
+        while (keys.hasNext()) {
+          val key = keys.next()
+          val o = root.optJSONObject(key) ?: continue
+          list.add(
+            ActivityRecord(
+              id = o.optString("id", key),
+              type = o.optString("type", "ACTIVITY"),
+              username = o.optString("username", o.optString("u", "")),
+              amountBirr = o.optInt("amountBirr", o.optInt("amt", 0)),
+              description = o.optString("description", o.optString("desc", "")),
+              extra = o.optString("extra", ""),
+              timestamp = o.optLong("timestamp", o.optLong("ts", System.currentTimeMillis()))
+            )
+          )
+        }
+      }
+    } catch (_: Exception) {
+    }
+    return list.sortedByDescending { it.timestamp }
   }
 
   private fun parseUserProfile(fallbackName: String, json: JSONObject): UserProfile? {

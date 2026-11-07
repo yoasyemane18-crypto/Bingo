@@ -247,6 +247,7 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             withdrawalRequests = uiState.withdrawalRequests,
             allUsers = uiState.allUsers,
             winnersHistory = uiState.winnersHistory,
+            activitiesHistory = uiState.activitiesHistory,
             onAdminLogin = { e, p -> viewModel.adminLogin(e, p) },
             onAdminLogout = { viewModel.adminLogout() },
             onApprovePayment = { id, amt -> viewModel.adminApprovePayment(id, amt) },

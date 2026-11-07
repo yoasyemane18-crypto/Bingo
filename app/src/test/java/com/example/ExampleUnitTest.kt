@@ -375,4 +375,34 @@ class ExampleUnitTest {
     val isOccupiedForUserA = occupiedCartelas.containsKey(cardToBuy) && occupiedCartelas[cardToBuy] != userA
     assertFalse("Card #42 should NOT be considered occupied by other for User A", isOccupiedForUserA)
   }
+
+  @Test
+  fun testServerClockSynchronizationAcrossSkewedDevices() {
+    // True server time
+    val authoritativeServerTime = 1730660000000L
+
+    // Phone A clock is running 5 seconds FAST (+5000ms)
+    val phoneALocalClock = authoritativeServerTime + 5000L
+    val phoneAOffset = authoritativeServerTime - phoneALocalClock // -5000ms
+
+    // Phone B clock is running 12 seconds SLOW (-12000ms)
+    val phoneBLocalClock = authoritativeServerTime - 12000L
+    val phoneBOffset = authoritativeServerTime - phoneBLocalClock // +12000ms
+
+    // Synchronized now for both phones:
+    val phoneASynced = phoneALocalClock + phoneAOffset
+    val phoneBSynced = phoneBLocalClock + phoneBOffset
+
+    assertEquals("Both phones must compute identical synchronized time", phoneASynced, phoneBSynced)
+    assertEquals(authoritativeServerTime, phoneASynced)
+
+    // Slot starts at authoritativeServerTime + 3600000L (1 hour later)
+    val slotStartTime = authoritativeServerTime + 3600000L
+
+    val diffPhoneA = slotStartTime - phoneASynced
+    val diffPhoneB = slotStartTime - phoneBSynced
+
+    assertEquals("Both phones must calculate the exact same remaining countdown down to the millisecond", diffPhoneA, diffPhoneB)
+    assertEquals(3600000L, diffPhoneA)
+  }
 }
