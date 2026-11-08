@@ -116,13 +116,15 @@ fun LobbyScreen(
   onStartGame: () -> Unit,
   onStartPracticeGame: () -> Unit = {},
   onOpenTelebirrGateway: (Int) -> Unit = {},
-  onSubmitPayment: (Int, String) -> Unit,
-  onSubmitWithdrawal: (Int, String) -> Unit,
+  onSubmitPayment: (Int, String, String) -> Unit,
+  onSubmitWithdrawal: (Int, String, String) -> Unit,
   onChangePlayingTime: (String) -> Unit,
   modifier: Modifier = Modifier
 ) {
   var quickGoInput by remember { mutableStateOf("") }
   var activeWalletTab by remember { mutableStateOf<String?>(null) } // "deposit", "withdraw", or null
+  var selectedDepositMethod by remember { mutableStateOf(com.example.payment.PaymentMethod.TELEBIRR) }
+  var selectedWithdrawMethod by remember { mutableStateOf(com.example.payment.PaymentMethod.TELEBIRR) }
   var depositAmount by remember { mutableStateOf("30") }
   var depositReceipt by remember { mutableStateOf("") }
   var withdrawAmount by remember { mutableStateOf("30") }
@@ -584,35 +586,6 @@ fun LobbyScreen(
           fontSize = 13.sp
         )
       }
-
-      Spacer(modifier = Modifier.height(10.dp))
-      OutlinedButton(
-        onClick = { onOpenTelebirrGateway(selectedCardsList.size.coerceAtLeast(1)) },
-        modifier = Modifier
-          .fillMaxWidth()
-          .height(48.dp)
-          .testTag("open_telebirr_gateway_button"),
-        shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.5.dp, BingoGold)
-      ) {
-        Icon(
-          imageVector = Icons.Default.PhoneAndroid,
-          contentDescription = null,
-          tint = BingoGold,
-          modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-          text = when (language) {
-            AppLanguage.EN -> "⚡ Instant Telebirr Entry (${cost.coerceAtLeast(30)} birr)"
-            AppLanguage.AM -> "⚡ በቴሌብር ወዲያውኑ ይግቡ (${cost.coerceAtLeast(30)} ብር)"
-            AppLanguage.TI -> "⚡ ብቴሌብር ቀጥታ ተሳተፉ (${cost.coerceAtLeast(30)} ብር)"
-          },
-          color = BingoGold,
-          fontWeight = FontWeight.Bold,
-          fontSize = 14.sp
-        )
-      }
     }
 
     // User Wallet Section (if logged in)
@@ -724,25 +697,89 @@ fun LobbyScreen(
                 .padding(14.dp)
             ) {
               Text(
-                text = "Add money via Telebirr",
+                text = "Select Payment Method",
                 fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 color = BingoGoldLight
               )
 
-              Spacer(modifier = Modifier.height(6.dp))
+              Spacer(modifier = Modifier.height(8.dp))
 
-              Text(
-                text = "Merchant: 0939383425 (Yemane)",
-                fontSize = 13.sp,
-                color = BingoTextWhite,
-                fontWeight = FontWeight.SemiBold
-              )
+              // Method Chips
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                com.example.payment.PaymentMethod.entries.forEach { method ->
+                  val isSelected = selectedDepositMethod == method
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) BingoGold else BingoNight,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) BingoGold else BingoBorderLight),
+                    modifier = Modifier
+                      .weight(1f)
+                      .clickable { selectedDepositMethod = method }
+                  ) {
+                    Box(
+                      modifier = Modifier.padding(vertical = 8.dp),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      Text(
+                        text = when (method) {
+                          com.example.payment.PaymentMethod.TELEBIRR -> "Telebirr"
+                          com.example.payment.PaymentMethod.CBE -> "CBE"
+                          com.example.payment.PaymentMethod.CBE_BIRR -> "CBE Birr"
+                          com.example.payment.PaymentMethod.E_BIRR -> "E-Birr"
+                        },
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) BingoTextDark else BingoTextWhite,
+                        textAlign = TextAlign.Center
+                      )
+                    }
+                  }
+                }
+              }
+
+              Spacer(modifier = Modifier.height(12.dp))
+
+              // Official receiver box
+              Card(
+                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = BingoNight),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                  Text(
+                    text = "${selectedDepositMethod.displayName} Official Receiver",
+                    color = BingoGold,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                  )
+                  Text(
+                    text = "Account Holder: ${selectedDepositMethod.receiverName}",
+                    color = BingoTextWhite,
+                    fontSize = 13.sp
+                  )
+                  Text(
+                    text = "Account / Number: ${selectedDepositMethod.receiverAccount}",
+                    color = BingoGreenLight,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                  )
+                  Spacer(modifier = Modifier.height(4.dp))
+                  Text(
+                    text = selectedDepositMethod.instruction,
+                    color = BingoTextMuted,
+                    fontSize = 11.sp
+                  )
+                }
+              }
 
               Spacer(modifier = Modifier.height(10.dp))
-
               LuxuryButton(
-                text = "⚡ Launch Telebirr & Verify Here",
+                text = "⚡ Open ${selectedDepositMethod.displayName} Gateway",
                 onClick = {
                   val amt = depositAmount.toIntOrNull() ?: 30
                   val cartelas = (amt / 30).coerceAtLeast(1)
@@ -753,10 +790,10 @@ fun LobbyScreen(
                 testTag = "wallet_launch_telebirr_gateway_btn"
               )
 
-              Spacer(modifier = Modifier.height(14.dp))
+              Spacer(modifier = Modifier.height(12.dp))
 
               Text(
-                text = "Or submit receipt manually for review:",
+                text = "Enter amount and paste your payment receipt / SMS confirmation:",
                 fontSize = 12.sp,
                 color = BingoTextMuted
               )
@@ -785,15 +822,15 @@ fun LobbyScreen(
               PasteableReceiptTextField(
                 value = depositReceipt,
                 onValueChange = { depositReceipt = it },
-                label = "Telebirr receipt link or number",
-                placeholder = "https://transactioninfo.ethiotelecom.et/receipt/... or CL...",
+                label = "${selectedDepositMethod.displayName} receipt, Tx ID, or SMS",
+                placeholder = "Paste transaction link, transaction ID, or full transfer SMS...",
                 testTag = "deposit_receipt_input"
               )
 
-              Spacer(modifier = Modifier.height(10.dp))
+              Spacer(modifier = Modifier.height(8.dp))
 
               Text(
-                text = "30 birr = 1 cartela, 60 = 2, 90 = 3… Below 30 birr is not confirmed.",
+                text = "30 birr = 1 cartela, 60 = 2, 90 = 3… Minimum 30 Birr.",
                 fontSize = 12.sp,
                 color = BingoTextMuted
               )
@@ -801,10 +838,10 @@ fun LobbyScreen(
               Spacer(modifier = Modifier.height(12.dp))
 
               LuxuryButton(
-                text = "Submit payment",
+                text = "Submit ${selectedDepositMethod.displayName} Payment",
                 onClick = {
                   val amt = depositAmount.toIntOrNull() ?: 0
-                  onSubmitPayment(amt, depositReceipt)
+                  onSubmitPayment(amt, depositReceipt, selectedDepositMethod.code)
                   depositReceipt = ""
                   activeWalletTab = null
                 },
@@ -824,9 +861,56 @@ fun LobbyScreen(
                 .padding(14.dp)
             ) {
               Text(
-                text = "Withdraw to Telebirr",
+                text = "Select Withdrawal Method",
                 fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
+                fontSize = 15.sp,
+                color = BingoGoldLight
+              )
+
+              Spacer(modifier = Modifier.height(8.dp))
+
+              // Method Chips for Withdrawal
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                com.example.payment.PaymentMethod.entries.forEach { method ->
+                  val isSelected = selectedWithdrawMethod == method
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) BingoGold else BingoNight,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) BingoGold else BingoBorderLight),
+                    modifier = Modifier
+                      .weight(1f)
+                      .clickable { selectedWithdrawMethod = method }
+                  ) {
+                    Box(
+                      modifier = Modifier.padding(vertical = 8.dp),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      Text(
+                        text = when (method) {
+                          com.example.payment.PaymentMethod.TELEBIRR -> "Telebirr"
+                          com.example.payment.PaymentMethod.CBE -> "CBE"
+                          com.example.payment.PaymentMethod.CBE_BIRR -> "CBE Birr"
+                          com.example.payment.PaymentMethod.E_BIRR -> "E-Birr"
+                        },
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) BingoTextDark else BingoTextWhite,
+                        textAlign = TextAlign.Center
+                      )
+                    }
+                  }
+                }
+              }
+
+              Spacer(modifier = Modifier.height(12.dp))
+
+              Text(
+                text = "Withdraw to ${selectedWithdrawMethod.displayName}",
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
                 color = BingoGoldLight
               )
 
@@ -854,9 +938,9 @@ fun LobbyScreen(
               OutlinedTextField(
                 value = withdrawAccount,
                 onValueChange = { withdrawAccount = it },
-                label = { Text("Telebirr account number") },
-                placeholder = { Text("09XXXXXXXX") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                label = { Text(selectedWithdrawMethod.accountLabel) },
+                placeholder = { Text(if (selectedWithdrawMethod == com.example.payment.PaymentMethod.CBE) "1000XXXXXXXX or 09XXXXXXXX" else "09XXXXXXXX") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                 singleLine = true,
                 modifier = Modifier
                   .fillMaxWidth()
@@ -872,7 +956,7 @@ fun LobbyScreen(
               Spacer(modifier = Modifier.height(10.dp))
 
               Text(
-                text = "Amount is deducted from wallet now. Admin sends it to your Telebirr number.",
+                text = "Amount is deducted from wallet now. Admin sends it to your ${selectedWithdrawMethod.displayName} account.",
                 fontSize = 12.sp,
                 color = BingoTextMuted
               )
@@ -880,10 +964,10 @@ fun LobbyScreen(
               Spacer(modifier = Modifier.height(12.dp))
 
               LuxuryButton(
-                text = "Request withdrawal",
+                text = "Request ${selectedWithdrawMethod.displayName} Withdrawal",
                 onClick = {
                   val amt = withdrawAmount.toIntOrNull() ?: 0
-                  onSubmitWithdrawal(amt, withdrawAccount)
+                  onSubmitWithdrawal(amt, withdrawAccount, selectedWithdrawMethod.code)
                   withdrawAccount = ""
                   activeWalletTab = null
                 },

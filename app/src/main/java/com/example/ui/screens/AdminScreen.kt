@@ -330,11 +330,30 @@ fun AdminScreen(
 
                   Spacer(modifier = Modifier.height(4.dp))
 
-                  Text(
-                    text = "Amount: ${p.amountBirr} Birr · Receipt: ${p.receiptId}",
-                    fontSize = 14.sp,
-                    color = BingoTextWhite
-                  )
+                  val method = com.example.payment.PaymentMethod.fromCode(p.paymentMethod)
+                  Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Surface(
+                      color = BingoPurpleDeep,
+                      shape = RoundedCornerShape(6.dp),
+                      border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold.copy(alpha = 0.5f))
+                    ) {
+                      Text(
+                        text = method.displayName,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = BingoGoldLight,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                      )
+                    }
+                    Text(
+                      text = "Amount: ${p.amountBirr} Birr · Receipt: ${p.receiptId}",
+                      fontSize = 14.sp,
+                      color = BingoTextWhite
+                    )
+                  }
 
                   if (p.receiptLink.isNotEmpty()) {
                     Text(
@@ -595,11 +614,30 @@ fun AdminScreen(
                     fontSize = 16.sp,
                     color = BingoGold
                   )
-                  Text(
-                    text = "Send ${w.amountBirr} birr to Telebirr: ${w.telebirrAccount}",
-                    fontSize = 15.sp,
-                    color = BingoTextWhite
-                  )
+                  val wMethod = com.example.payment.PaymentMethod.fromCode(w.paymentMethod)
+                  Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Surface(
+                      color = BingoPurpleDeep,
+                      shape = RoundedCornerShape(6.dp),
+                      border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold.copy(alpha = 0.5f))
+                    ) {
+                      Text(
+                        text = wMethod.displayName,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = BingoGoldLight,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                      )
+                    }
+                    Text(
+                      text = "Send ${w.amountBirr} birr to ${w.telebirrAccount}",
+                      fontSize = 15.sp,
+                      color = BingoTextWhite
+                    )
+                  }
 
                   Spacer(modifier = Modifier.height(10.dp))
 

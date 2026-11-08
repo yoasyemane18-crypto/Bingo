@@ -204,12 +204,13 @@ class FirebaseRtdbService {
           list.add(
             PaymentRequest(
               id = o.optString("id", key),
-              username = o.optString("u", ""),
+              username = o.optString("u", o.optString("username", "")),
               phone = o.optString("phone", ""),
-              amountBirr = o.optInt("amt", 0),
-              receiptId = o.optString("rid", ""),
-              receiptLink = o.optString("link", ""),
-              timestamp = o.optLong("ts", System.currentTimeMillis()),
+              amountBirr = o.optInt("amt", o.optInt("amountBirr", 0)),
+              receiptId = o.optString("rid", o.optString("receiptId", "")),
+              receiptLink = o.optString("link", o.optString("receiptLink", "")),
+              paymentMethod = o.optString("pm", o.optString("paymentMethod", "telebirr")),
+              timestamp = o.optLong("ts", o.optLong("timestamp", System.currentTimeMillis())),
               status = status
             )
           )
@@ -233,6 +234,8 @@ class FirebaseRtdbService {
     json.put("receiptId", p.receiptId)
     json.put("link", p.receiptLink)
     json.put("receiptLink", p.receiptLink)
+    json.put("pm", p.paymentMethod)
+    json.put("paymentMethod", p.paymentMethod)
     json.put("ts", p.timestamp)
     json.put("timestamp", p.timestamp)
     json.put("st", p.status.name.lowercase())
@@ -266,7 +269,7 @@ class FirebaseRtdbService {
         while (keys.hasNext()) {
           val key = keys.next()
           val o = root.optJSONObject(key) ?: continue
-          val statusStr = o.optString("st", "pending").uppercase()
+          val statusStr = o.optString("st", o.optString("status", "pending")).uppercase()
           val status = when (statusStr) {
             "APPROVED" -> RequestStatus.APPROVED
             "DECLINED" -> RequestStatus.DECLINED
@@ -275,11 +278,12 @@ class FirebaseRtdbService {
           list.add(
             WithdrawalRequest(
               id = o.optString("id", key),
-              username = o.optString("u", ""),
+              username = o.optString("u", o.optString("username", "")),
               phone = o.optString("phone", ""),
-              amountBirr = o.optInt("amt", 0),
+              amountBirr = o.optInt("amt", o.optInt("amountBirr", 0)),
               telebirrAccount = o.optString("acct", o.optString("account", "")),
-              timestamp = o.optLong("ts", System.currentTimeMillis()),
+              paymentMethod = o.optString("pm", o.optString("paymentMethod", "telebirr")),
+              timestamp = o.optLong("ts", o.optLong("timestamp", System.currentTimeMillis())),
               status = status
             )
           )
@@ -301,6 +305,8 @@ class FirebaseRtdbService {
     json.put("amountBirr", w.amountBirr)
     json.put("acct", w.telebirrAccount)
     json.put("account", w.telebirrAccount)
+    json.put("pm", w.paymentMethod)
+    json.put("paymentMethod", w.paymentMethod)
     json.put("ts", w.timestamp)
     json.put("timestamp", w.timestamp)
     json.put("st", w.status.name.lowercase())
@@ -465,6 +471,11 @@ class FirebaseRtdbService {
     }
   }
 
+  fun fetchSessionOccupiedCartelasCount(sessionId: String): Int {
+    val occupied = fetchSessionOccupiedCartelas(sessionId)
+    return occupied.size
+  }
+
   fun fetchSessionPlayerCount(sessionId: String): Int {
     val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/players.json"
     val request = Request.Builder().url(url).get().build()
@@ -479,6 +490,44 @@ class FirebaseRtdbService {
     } catch (_: Exception) {
       1
     }
+  }
+
+  /**
+   * Shared countdown synchronization for rounds across all devices:
+   * Sets or fetches the canonical epoch start timestamp for roundNum in sessionId.
+   * If not already set on the server, initializes it to targetStartMs.
+   * All players will sync to this exact millisecond!
+   */
+  fun getOrCreateRoundStartTime(sessionId: String, roundNum: Int, targetStartMs: Long): Long {
+    val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/round_$roundNum/start_time.json"
+    try {
+      // 1. Try to read existing server start time
+      val getReq = Request.Builder().url(url).get().build()
+      httpClient.newCall(getReq).execute().use { resp ->
+        if (resp.isSuccessful) {
+          val body = resp.body?.string()?.trim()
+          if (!body.isNullOrBlank() && body != "null") {
+            val existing = body.toLongOrNull()
+            if (existing != null && existing > 0L) {
+              return existing
+            }
+          }
+        }
+      }
+    } catch (_: Exception) {}
+
+    // 2. Put targetStartMs if not already created
+    try {
+      val putBody = targetStartMs.toString().toRequestBody(jsonMediaType)
+      val putReq = Request.Builder().url(url).put(putBody).build()
+      httpClient.newCall(putReq).execute().use { resp ->
+        if (resp.isSuccessful) {
+          return targetStartMs
+        }
+      }
+    } catch (_: Exception) {}
+
+    return targetStartMs
   }
 
   fun fetchRoundWinner(sessionId: String, roundNum: Int): WinnerRecord? {

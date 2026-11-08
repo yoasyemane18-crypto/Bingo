@@ -470,14 +470,16 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     }
   }
 
-  // --- Telebirr Payments & Withdrawals ---
+  // --- Payments & Withdrawals (Telebirr, CBE, CBE Birr, E-Birr) ---
 
-  fun submitPayment(amountBirr: Int, receiptRaw: String) {
+  fun submitPayment(amountBirr: Int, receiptRaw: String, paymentMethod: String = "telebirr") {
     val user = _uiState.value.currentUser ?: return
     if (amountBirr < BingoRepository.PAY_BIRR) {
       showAlert("Declined: Payment below ${BingoRepository.PAY_BIRR} Birr is not confirmed.")
       return
     }
+
+    val methodObj = com.example.payment.PaymentMethod.fromCode(paymentMethod)
 
     viewModelScope.launch {
       val existingReceipts = repository.getPaymentRequests()
@@ -488,11 +490,12 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       val verification = telebirrGateway.verifyTransaction(
         receiptRawInput = receiptRaw,
         expectedAmountBirr = amountBirr,
-        existingReceipts = existingReceipts
+        existingReceipts = existingReceipts,
+        paymentMethod = methodObj.code
       )
 
       if (verification.isSuccess) {
-        // System automatically APPROVES valid payment
+        // System itself automatically APPROVES valid payment for Telebirr, CBE, CBE Birr, or E-Birr
         val request = PaymentRequest(
           id = UUID.randomUUID().toString().take(8),
           username = user.username,
@@ -500,6 +503,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           amountBirr = verification.verifiedAmountBirr,
           receiptId = verification.transactionId,
           receiptLink = receiptRaw.trim(),
+          paymentMethod = methodObj.code,
           status = RequestStatus.APPROVED
         )
         repository.addPaymentRequest(request)
@@ -508,7 +512,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         val newBal = user.walletBalance + verification.verifiedAmountBirr
         val tx = WalletTransaction(
           id = UUID.randomUUID().toString(),
-          label = "Telebirr Deposit: ${verification.transactionId}",
+          label = "${methodObj.displayName} Deposit: ${verification.transactionId}",
           amount = verification.verifiedAmountBirr
         )
         val updatedUser = user.copy(
@@ -524,7 +528,8 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
             type = "DEPOSIT_APPROVED",
             username = user.username,
             amountBirr = verification.verifiedAmountBirr,
-            description = "Deposit approved: ${verification.verifiedAmountBirr} Birr by ${user.username} (Tx: ${verification.transactionId})"
+            description = "Deposit auto-approved (${methodObj.displayName}): ${verification.verifiedAmountBirr} Birr by ${user.username} (Tx: ${verification.transactionId})",
+            extra = methodObj.displayName
           )
         }
 
@@ -532,14 +537,14 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         refreshData()
 
         showAlert(
-          "✔ Payment Approved!\n\n" +
+          "✔ ${methodObj.displayName} Payment Approved!\n\n" +
             "${verification.verifiedAmountBirr} Birr has been automatically verified and added to your wallet.\n" +
             "Transaction ID: ${verification.transactionId}\n" +
-            "Receiver: ${TelebirrConfig.MERCHANT_ACCOUNT} (${TelebirrConfig.MERCHANT_NAME})\n" +
+            "Receiver: ${methodObj.receiverAccount} (${methodObj.receiverName})\n" +
             "New Wallet Balance: $newBal Birr"
         )
       } else {
-        // System automatically DECLINES invalid payment
+        // System itself automatically DECLINES invalid payment
         val safeId = TelebirrSecurity.extractTransactionId(receiptRaw) ?: UUID.randomUUID().toString().take(8)
         val declinedRequest = PaymentRequest(
           id = UUID.randomUUID().toString().take(8),
@@ -548,6 +553,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           amountBirr = amountBirr,
           receiptId = safeId,
           receiptLink = "${receiptRaw.trim()} [${verification.message}]",
+          paymentMethod = methodObj.code,
           status = RequestStatus.DECLINED
         )
         repository.addPaymentRequest(declinedRequest)
@@ -558,20 +564,21 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
             type = "DEPOSIT_DECLINED",
             username = user.username,
             amountBirr = amountBirr,
-            description = "Deposit declined: $amountBirr Birr for ${user.username} (${verification.message})"
+            description = "${methodObj.displayName} deposit auto-declined: $amountBirr Birr for ${user.username} (${verification.message})",
+            extra = methodObj.displayName
           )
         }
         refreshData()
 
         showAlert(
-          "❌ Payment Declined\n\n" +
+          "❌ ${methodObj.displayName} Payment Declined\n\n" +
             verification.message
         )
       }
     }
   }
 
-  fun submitWithdrawal(amountBirr: Int, account: String) {
+  fun submitWithdrawal(amountBirr: Int, account: String, paymentMethod: String = "telebirr") {
     val user = _uiState.value.currentUser ?: return
     if (amountBirr < BingoRepository.PAY_BIRR) {
       showAlert("Minimum withdrawal is ${BingoRepository.PAY_BIRR} birr.")
@@ -581,17 +588,19 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       showAlert("You cannot withdraw more than your wallet balance.")
       return
     }
-    if (!account.matches(Regex("(\\+?251|0)9\\d{8}"))) {
-      showAlert("Enter a valid Telebirr account number (09XXXXXXXX).")
+    if (account.trim().length < 8) {
+      showAlert("Enter a valid account or phone number.")
       return
     }
+
+    val methodObj = com.example.payment.PaymentMethod.fromCode(paymentMethod)
 
     viewModelScope.launch(Dispatchers.IO) {
       // Deduct immediately from wallet
       val newBal = user.walletBalance - amountBirr
       val tx = WalletTransaction(
         id = UUID.randomUUID().toString(),
-        label = "Withdrawal to $account: -$amountBirr Birr",
+        label = "Withdrawal via ${methodObj.displayName} to $account: -$amountBirr Birr",
         amount = -amountBirr,
         timestamp = System.currentTimeMillis()
       )
@@ -609,6 +618,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         phone = user.phone,
         amountBirr = amountBirr,
         telebirrAccount = account,
+        paymentMethod = methodObj.code,
         timestamp = System.currentTimeMillis()
       )
       repository.addWithdrawalRequest(req)
@@ -618,14 +628,14 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         type = "WITHDRAWAL_REQUEST",
         username = user.username,
         amountBirr = amountBirr,
-        description = "Withdrawal requested: $amountBirr Birr to $account by ${user.username}",
-        extra = account
+        description = "Withdrawal requested via ${methodObj.displayName}: $amountBirr Birr to $account by ${user.username}",
+        extra = "${methodObj.displayName}: $account"
       )
 
       withContext(Dispatchers.Main) {
         _uiState.update { it.copy(currentUser = updatedUser) }
         refreshData(syncRemote = true)
-        showAlert("✔ Withdrawal requested. The admin will send $amountBirr birr to $account.")
+        showAlert("✔ Withdrawal requested. The admin will transfer $amountBirr birr to your ${methodObj.displayName} account: $account.")
       }
     }
   }
@@ -654,24 +664,29 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     }
   }
 
-  fun launchTelebirrPaymentApp() {
+  fun launchPaymentApp(method: com.example.payment.PaymentMethod = com.example.payment.PaymentMethod.TELEBIRR) {
     val order = _uiState.value.activeTelebirrOrder ?: return
-    telebirrGateway.launchTelebirrPayment(order)
+    telebirrGateway.launchPaymentAppOrUssd(method, order)
+  }
+
+  fun launchTelebirrPaymentApp() {
+    launchPaymentApp(com.example.payment.PaymentMethod.TELEBIRR)
+  }
+
+  fun copyPaymentDetails(method: com.example.payment.PaymentMethod = com.example.payment.PaymentMethod.TELEBIRR) {
+    val order = _uiState.value.activeTelebirrOrder
+    telebirrGateway.copyPaymentDetails(method, order)
+    showToast("${method.displayName} details copied to clipboard.")
   }
 
   fun copyTelebirrDetails() {
-    val order = _uiState.value.activeTelebirrOrder
-    if (order != null) {
-      telebirrGateway.copyPaymentDetails(order)
-    } else {
-      telebirrGateway.copyMerchantNumberOnly()
-    }
-    showToast("Merchant details copied to clipboard.")
+    copyPaymentDetails(com.example.payment.PaymentMethod.TELEBIRR)
   }
 
-  fun verifyTelebirrPayment(receiptRawInput: String) {
+  fun verifyPaymentGateway(receiptRawInput: String, paymentMethod: String = "telebirr") {
     val order = _uiState.value.activeTelebirrOrder ?: return
     val user = _uiState.value.currentUser ?: return
+    val methodObj = com.example.payment.PaymentMethod.fromCode(paymentMethod)
 
     viewModelScope.launch {
       _uiState.update { it.copy(isTelebirrVerifying = true, telebirrErrorMessage = null) }
@@ -680,7 +695,8 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       val verification = telebirrGateway.verifyTransaction(
         receiptRawInput = receiptRawInput,
         expectedAmountBirr = order.totalAmountBirr,
-        existingReceipts = existingReceipts
+        existingReceipts = existingReceipts,
+        paymentMethod = paymentMethod
       )
 
       if (verification.isSuccess) {
@@ -692,6 +708,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           amountBirr = verification.verifiedAmountBirr,
           receiptId = verification.transactionId,
           receiptLink = receiptRawInput.trim(),
+          paymentMethod = paymentMethod,
           status = RequestStatus.APPROVED
         )
         repository.addPaymentRequest(request)
@@ -700,7 +717,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         val newBal = user.walletBalance + verification.verifiedAmountBirr
         val tx = WalletTransaction(
           id = UUID.randomUUID().toString(),
-          label = "Telebirr Gateway: ${verification.transactionId}",
+          label = "${methodObj.displayName} Gateway: ${verification.transactionId}",
           amount = verification.verifiedAmountBirr
         )
         val updatedUser = user.copy(
@@ -716,7 +733,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
             type = "DEPOSIT_APPROVED",
             username = user.username,
             amountBirr = verification.verifiedAmountBirr,
-            description = "Telebirr Gateway: ${verification.verifiedAmountBirr} Birr deposited by ${user.username} (Tx: ${verification.transactionId})"
+            description = "${methodObj.displayName} Gateway: ${verification.verifiedAmountBirr} Birr deposited by ${user.username} (Tx: ${verification.transactionId})"
           )
         }
 
@@ -729,8 +746,34 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           )
         }
         refreshData()
-        showAlert("✔ Telebirr payment verified! ${verification.verifiedAmountBirr} birr added to your wallet. You can now join the game!")
+
+        // Automatically complete cartela purchase for 3 games
+        joinScheduledGame()
+        showAlert("✔ ${methodObj.displayName} payment verified! ${verification.verifiedAmountBirr} birr added to your wallet. Cartela reserved for all 3 games!")
       } else {
+        // Record declined payment in local repo and Firebase RTDB
+        val declRequest = PaymentRequest(
+          id = UUID.randomUUID().toString().take(8),
+          username = user.username,
+          phone = user.phone,
+          amountBirr = order.totalAmountBirr,
+          receiptId = if (verification.transactionId.isNotBlank()) verification.transactionId else "DEC-${System.currentTimeMillis() % 100000}",
+          receiptLink = receiptRawInput.trim(),
+          paymentMethod = paymentMethod,
+          status = RequestStatus.DECLINED
+        )
+        repository.addPaymentRequest(declRequest)
+
+        viewModelScope.launch(Dispatchers.IO) {
+          repository.remoteService.savePaymentRequest(declRequest)
+          repository.remoteService.logActivity(
+            type = "DEPOSIT_DECLINED",
+            username = user.username,
+            amountBirr = order.totalAmountBirr,
+            description = "${methodObj.displayName} Gateway: Deposit declined for ${user.username} (${verification.message})"
+          )
+        }
+
         _uiState.update {
           it.copy(
             isTelebirrVerifying = false,
@@ -739,6 +782,10 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         }
       }
     }
+  }
+
+  fun verifyTelebirrPayment(receiptRawInput: String) {
+    verifyPaymentGateway(receiptRawInput, "telebirr")
   }
 
   fun dismissTelebirrGateway() {
@@ -955,19 +1002,28 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       BingoEngine.generateCard(cardNum, _uiState.value.cardSeed)
     }
 
-    // Register user in the multiplayer session on Firebase & fetch players
+    val slotLabel = user.playingTime
+    val synchedNow = repository.getSynchronizedTimeMs()
+
+    // Total purchased / playing cards in this playing time session:
+    // User requested formula: 70% * (Total purchased cards in this slot) * 10 Birr per game
+    val sessionOccupiedCards = repository.getOccupiedCartelas(sessionId).size.coerceAtLeast(selected.size).coerceAtLeast(1)
+    val roundPrize = (sessionOccupiedCards * BingoRepository.BIRR_PER_GAME * BingoRepository.PRIZE_PERCENTAGE).toInt().coerceAtLeast(7)
+
+    // Register user in the multiplayer session on Firebase & fetch players and total cards asynchronously
     viewModelScope.launch(Dispatchers.IO) {
       repository.remoteService.registerPlayerInSession(sessionId, user.username, selected.size)
       val count = repository.remoteService.fetchSessionPlayerCount(sessionId)
-      _uiState.update { it.copy(activePlayerCount = count) }
+      val remoteTotalCards = repository.remoteService.fetchSessionOccupiedCartelasCount(sessionId)
+      val actualCards = remoteTotalCards.coerceAtLeast(sessionOccupiedCards)
+      val updatedPrize = (actualCards * BingoRepository.BIRR_PER_GAME * BingoRepository.PRIZE_PERCENTAGE).toInt().coerceAtLeast(7)
+      _uiState.update {
+        it.copy(
+          activePlayerCount = count,
+          winnerRewardBirr = updatedPrize
+        )
+      }
     }
-
-    // 1 cartela = 30 Birr for 3 games (10 Birr per 1 game)
-    val players = _uiState.value.activePlayerCount.coerceAtLeast(2)
-    val roundCost = selected.size * BingoRepository.BIRR_PER_GAME * players
-    val roundPrize = (roundCost * BingoRepository.PRIZE_PERCENTAGE).toInt().coerceAtLeast(20)
-    val slotLabel = user.playingTime
-    val synchedNow = repository.getSynchronizedTimeMs()
 
     val firstRound = slotInfo.rounds.firstOrNull() ?: ActiveRound(
       1, "r1", synchedNow, synchedNow + 400000L, slotLabel
@@ -1021,13 +1077,27 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       )
     }
 
-    val cartelaCount = _uiState.value.activeCards.size.coerceAtLeast(1)
-    val players = _uiState.value.activePlayerCount.coerceAtLeast(2)
+    val sessionId = _uiState.value.currentSessionId
+    val localOccupiedCount = if (sessionId != null) repository.getOccupiedCartelas(sessionId).size else 0
+    val totalPurchasedCards = localOccupiedCount.coerceAtLeast(_uiState.value.activeCards.size).coerceAtLeast(1)
+
+    // Formula: Winner Reward = 70% * (purchased cards in that playing time) * 10 Birr per game
     val roundPrize = if (isPractice) {
       0
     } else {
-      val roundPool = cartelaCount * players * BingoRepository.BIRR_PER_GAME
-      (roundPool * BingoRepository.PRIZE_PERCENTAGE).toInt().coerceAtLeast(20)
+      val roundPool = totalPurchasedCards * BingoRepository.BIRR_PER_GAME
+      (roundPool * BingoRepository.PRIZE_PERCENTAGE).toInt().coerceAtLeast(7)
+    }
+
+    if (!isPractice && sessionId != null) {
+      viewModelScope.launch(Dispatchers.IO) {
+        val remoteCount = repository.remoteService.fetchSessionOccupiedCartelasCount(sessionId)
+        if (remoteCount > totalPurchasedCards) {
+          val remotePool = remoteCount * BingoRepository.BIRR_PER_GAME
+          val updatedPrize = (remotePool * BingoRepository.PRIZE_PERCENTAGE).toInt().coerceAtLeast(7)
+          _uiState.update { it.copy(winnerRewardBirr = updatedPrize) }
+        }
+      }
     }
 
     val slotInfo = if (!isPractice) {
@@ -1063,6 +1133,10 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
   fun startIntermissionToNextRound() {
     intermissionJob?.cancel()
     val nextRound = _uiState.value.currentRoundNumber + 1
+    val sessionId = _uiState.value.currentSessionId
+    val synchedNow = repository.getSynchronizedTimeMs()
+    val targetStart = synchedNow + 10000L // 10 seconds intermission
+
     _uiState.update {
       it.copy(
         isIntermission = true,
@@ -1072,15 +1146,28 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       )
     }
     soundManager.speak(
-      "Game ${_uiState.value.currentRoundNumber} complete. Game $nextRound starting soon.",
-      "ጨዋታ ${_uiState.value.currentRoundNumber} ተጠናቋል። ጨዋታ $nextRound ሊጀመር ነው"
+      "Game ${_uiState.value.currentRoundNumber} complete. Game $nextRound starting in 10 seconds.",
+      "ጨዋታ ${_uiState.value.currentRoundNumber} ተጠናቋል። ጨዋታ $nextRound በ10 ሰከንድ ይጀምራል"
     )
 
     intermissionJob = viewModelScope.launch {
-      for (sec in 10 downTo 1) {
-        _uiState.update { it.copy(intermissionSecondsLeft = sec) }
-        delay(1000L)
+      // Synchronize exact shared start time on Firebase backend across all devices
+      var canonicalStartMs = targetStart
+      if (sessionId != null) {
+        canonicalStartMs = withContext(Dispatchers.IO) {
+          repository.remoteService.getOrCreateRoundStartTime(sessionId, nextRound, targetStart)
+        }
       }
+
+      while (true) {
+        val now = repository.getSynchronizedTimeMs()
+        val remainingMs = canonicalStartMs - now
+        if (remainingMs <= 0) break
+        val remainingSec = ((remainingMs + 999) / 1000).toInt()
+        _uiState.update { it.copy(intermissionSecondsLeft = remainingSec.coerceAtLeast(1)) }
+        delay(250L)
+      }
+      _uiState.update { it.copy(intermissionSecondsLeft = 0) }
       startRound(nextRound)
     }
   }
@@ -1118,7 +1205,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     navigateTo(Screen.PLAY_LOBBY)
   }
 
-  // --- Live Bingo Game Loop ---
+  // --- Live Bingo Game Loop with Millisecond-Synchronized Ball Calling ---
 
   private fun launchGameLoop(seed: Long, roundNum: Int = _uiState.value.currentRoundNumber) {
     gameLoopJob?.cancel()
@@ -1128,7 +1215,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     val myUsername = _uiState.value.currentUser?.username ?: ""
 
     gameLoopJob = viewModelScope.launch {
-      // 1. Ready Countdown phase (Ready, 3, 2, 1)
+      // 1. Ready Countdown phase (Ready, 3, 2, 1) synchronized
       val steps = listOf("Ready", "3", "2", "1")
       for (s in steps) {
         _uiState.update { it.copy(readyCountdownStep = s) }
@@ -1137,11 +1224,14 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       }
       _uiState.update { it.copy(readyCountdownStep = null) }
 
-      // 2. Concurrent remote winner polling for real multiplayer
+      // 2. Compute canonical start timestamp for ball drawing
+      val ballBaseStartMs = repository.getSynchronizedTimeMs()
+
+      // 3. Concurrent remote winner polling for real multiplayer
       val remotePollJob = if (!isPractice && sessionId != null) {
         launch(Dispatchers.IO) {
           while (!_uiState.value.isGameEnded && !_uiState.value.isIntermission) {
-            delay(2000L)
+            delay(1500L)
             try {
               val remoteWinner = repository.remoteService.fetchRoundWinner(sessionId, roundNum)
               if (remoteWinner != null && remoteWinner.username.isNotBlank() && remoteWinner.username != myUsername) {
@@ -1169,10 +1259,11 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         }
       } else null
 
-      // 3. Draw ball every 5000ms
-      for (drawn in fullSequence) {
+      // 4. Draw ball synchronously every 5000ms based on authoritative time
+      for (index in fullSequence.indices) {
         if (_uiState.value.isGameEnded || _uiState.value.isIntermission) break
 
+        val drawn = fullSequence[index]
         val newCalled = _uiState.value.calledNumbers + drawn
         _uiState.update {
           it.copy(
@@ -1189,7 +1280,11 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           autoMarkNumber(drawn)
         }
 
-        delay(BingoRepository.CALL_INTERVAL_MS)
+        // Align next ball call exactly with authoritative millisecond grid
+        val expectedNextCallTime = ballBaseStartMs + (index + 1) * BingoRepository.CALL_INTERVAL_MS
+        val currentNow = repository.getSynchronizedTimeMs()
+        val delayLeft = (expectedNextCallTime - currentNow).coerceIn(500L, BingoRepository.CALL_INTERVAL_MS)
+        delay(delayLeft)
       }
 
       remotePollJob?.cancel()

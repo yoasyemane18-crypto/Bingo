@@ -175,8 +175,8 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             },
             onStartPracticeGame = { viewModel.startPracticeGame() },
             onOpenTelebirrGateway = { count -> viewModel.openTelebirrGatewayForGameEntry(count) },
-            onSubmitPayment = { amt, r -> viewModel.submitPayment(amt, r) },
-            onSubmitWithdrawal = { amt, acct -> viewModel.submitWithdrawal(amt, acct) },
+            onSubmitPayment = { amt, r, method -> viewModel.submitPayment(amt, r, method) },
+            onSubmitWithdrawal = { amt, acct, method -> viewModel.submitWithdrawal(amt, acct, method) },
             onChangePlayingTime = { newTime -> viewModel.changePlayingTime(newTime) }
           )
 
@@ -305,9 +305,9 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
         order = uiState.activeTelebirrOrder!!,
         isVerifying = uiState.isTelebirrVerifying,
         errorMessage = uiState.telebirrErrorMessage,
-        onOpenTelebirrApp = { viewModel.launchTelebirrPaymentApp() },
-        onCopyDetails = { viewModel.copyTelebirrDetails() },
-        onVerifyReceipt = { receipt -> viewModel.verifyTelebirrPayment(receipt) },
+        onOpenPaymentApp = { method -> viewModel.launchPaymentApp(method) },
+        onCopyDetails = { method -> viewModel.copyPaymentDetails(method) },
+        onVerifyReceipt = { receipt, method -> viewModel.verifyPaymentGateway(receipt, method.code) },
         onDismiss = { viewModel.dismissTelebirrGateway() }
       )
     }

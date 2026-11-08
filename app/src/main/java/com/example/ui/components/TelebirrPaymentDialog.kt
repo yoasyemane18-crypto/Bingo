@@ -15,10 +15,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -31,8 +33,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,33 +43,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.example.payment.telebirr.TelebirrConfig
+import com.example.payment.PaymentMethod
 import com.example.payment.telebirr.TelebirrOrder
 import com.example.ui.theme.BingoBorderLight
 import com.example.ui.theme.BingoBorderPurple
 import com.example.ui.theme.BingoCardBg
 import com.example.ui.theme.BingoGold
-import com.example.ui.theme.BingoGoldDark
 import com.example.ui.theme.BingoGoldLight
-import com.example.ui.theme.BingoGreen
-import com.example.ui.theme.BingoGreenLight
 import com.example.ui.theme.BingoNight
 import com.example.ui.theme.BingoPurpleDeep
 import com.example.ui.theme.BingoPurpleVibrant
 import com.example.ui.theme.BingoRedLight
 import com.example.ui.theme.BingoSurface
-import com.example.ui.theme.BingoSurfaceLight
 import com.example.ui.theme.BingoTextDark
 import com.example.ui.theme.BingoTextMuted
 import com.example.ui.theme.BingoTextWhite
@@ -80,14 +74,15 @@ fun TelebirrPaymentDialog(
   order: TelebirrOrder,
   isVerifying: Boolean,
   errorMessage: String?,
-  onOpenTelebirrApp: () -> Unit,
-  onCopyDetails: () -> Unit,
-  onVerifyReceipt: (String) -> Unit,
+  onOpenPaymentApp: (PaymentMethod) -> Unit = {},
+  onCopyDetails: (PaymentMethod) -> Unit = {},
+  onVerifyReceipt: (receipt: String, method: PaymentMethod) -> Unit,
   onDismiss: () -> Unit
 ) {
+  var selectedMethod by remember { mutableStateOf(PaymentMethod.TELEBIRR) }
   var receiptInput by remember { mutableStateOf("") }
-  val clipboard = LocalClipboardManager.current
   val context = LocalContext.current
+  val scrollState = rememberScrollState()
 
   Dialog(onDismissRequest = onDismiss) {
     Card(
@@ -96,22 +91,26 @@ fun TelebirrPaymentDialog(
       border = androidx.compose.foundation.BorderStroke(1.5.dp, BingoGold),
       modifier = Modifier
         .fillMaxWidth()
-        .padding(8.dp)
+        .padding(6.dp)
         .testTag("telebirr_payment_gateway_dialog")
     ) {
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(20.dp),
+          .verticalScroll(scrollState)
+          .padding(18.dp),
         horizontalAlignment = Alignment.CenterHorizontally
       ) {
-        // Top Header with Close icon
+        // Top Header with Lock and Close Icon
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+          ) {
             Icon(
               imageVector = Icons.Default.Lock,
               contentDescription = "Secure",
@@ -120,11 +119,12 @@ fun TelebirrPaymentDialog(
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-              text = "Telebirr Secure Gateway",
+              text = "${selectedMethod.displayName} Gateway",
               fontFamily = PlayfairFontFamily,
               fontWeight = FontWeight.Bold,
-              fontSize = 18.sp,
-              color = BingoGoldLight
+              fontSize = 17.sp,
+              color = BingoGoldLight,
+              maxLines = 1
             )
           }
 
@@ -140,6 +140,61 @@ fun TelebirrPaymentDialog(
           }
         }
 
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Payment Method Selector Tabs (Telebirr, CBE, CBE Birr, E-Birr)
+        Text(
+          text = "Select Payment Method",
+          fontWeight = FontWeight.SemiBold,
+          fontSize = 13.sp,
+          color = BingoGoldLight,
+          modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          PaymentMethod.entries.forEach { method ->
+            val isSelected = selectedMethod == method
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = if (isSelected) BingoGold else BingoNight,
+              border = androidx.compose.foundation.BorderStroke(
+                1.2.dp,
+                if (isSelected) BingoGold else BingoBorderLight
+              ),
+              modifier = Modifier
+                .weight(1f)
+                .clickable {
+                  selectedMethod = method
+                  receiptInput = ""
+                }
+                .testTag("payment_method_${method.code}")
+            ) {
+              Box(
+                modifier = Modifier.padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+              ) {
+                Text(
+                  text = when (method) {
+                    PaymentMethod.TELEBIRR -> "Telebirr"
+                    PaymentMethod.CBE -> "CBE"
+                    PaymentMethod.CBE_BIRR -> "CBE Birr"
+                    PaymentMethod.E_BIRR -> "E-Birr"
+                  },
+                  fontSize = 11.sp,
+                  fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                  color = if (isSelected) BingoTextDark else BingoTextWhite,
+                  textAlign = TextAlign.Center
+                )
+              }
+            }
+          }
+        }
+
         Spacer(modifier = Modifier.height(14.dp))
 
         // Order Summary Card
@@ -152,13 +207,13 @@ fun TelebirrPaymentDialog(
           Column(
             modifier = Modifier
               .fillMaxWidth()
-              .padding(14.dp),
+              .padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
           ) {
             Text(
-              text = "Game Entry · ${order.cartelaCount} Cartela(s)",
+              text = "Game Entry · ${order.cartelaCount} Cartela(s) (All 3 Games)",
               color = BingoGoldLight,
-              fontSize = 14.sp,
+              fontSize = 13.sp,
               fontWeight = FontWeight.Medium
             )
 
@@ -166,19 +221,19 @@ fun TelebirrPaymentDialog(
               text = "${order.totalAmountBirr} ETB",
               fontFamily = PlayfairFontFamily,
               fontWeight = FontWeight.Bold,
-              fontSize = 32.sp,
+              fontSize = 28.sp,
               color = BingoGold
             )
 
             Text(
               text = "Order: ${order.orderId}",
               color = BingoTextMuted,
-              fontSize = 12.sp
+              fontSize = 11.sp
             )
           }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Merchant Receiver Account Card
         Card(
@@ -187,83 +242,112 @@ fun TelebirrPaymentDialog(
           border = androidx.compose.foundation.BorderStroke(1.dp, BingoBorderPurple),
           modifier = Modifier.fillMaxWidth()
         ) {
-          Row(
+          Column(
             modifier = Modifier
               .fillMaxWidth()
-              .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+              .padding(12.dp)
           ) {
-            Column {
-              Text(
-                text = "Transfer to Telebirr Account:",
-                color = BingoTextMuted,
-                fontSize = 12.sp
-              )
-              Text(
-                text = "${TelebirrConfig.MERCHANT_NAME} · ${TelebirrConfig.MERCHANT_ACCOUNT}",
-                color = BingoTextWhite,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp
-              )
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text = "Transfer to ${selectedMethod.displayName}:",
+                  color = BingoTextMuted,
+                  fontSize = 11.sp
+                )
+                Text(
+                  text = "${selectedMethod.receiverName} · ${selectedMethod.receiverAccount}",
+                  color = BingoTextWhite,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 15.sp
+                )
+              }
+
+              Surface(
+                modifier = Modifier
+                  .clip(CircleShape)
+                  .clickable {
+                    onCopyDetails(selectedMethod)
+                    Toast.makeText(
+                      context,
+                      "Copied ${selectedMethod.displayName} account (${selectedMethod.receiverAccount})",
+                      Toast.LENGTH_SHORT
+                    ).show()
+                  },
+                color = BingoPurpleDeep
+              ) {
+                Icon(
+                  imageVector = Icons.Default.ContentCopy,
+                  contentDescription = "Copy number",
+                  tint = BingoGold,
+                  modifier = Modifier
+                    .padding(8.dp)
+                    .size(18.dp)
+                )
+              }
             }
 
-            Surface(
-              modifier = Modifier
-                .clip(CircleShape)
-                .clickable {
-                  onCopyDetails()
-                  Toast.makeText(context, "Number copied to clipboard", Toast.LENGTH_SHORT).show()
-                },
-              color = BingoPurpleDeep
-            ) {
-              Icon(
-                imageVector = Icons.Default.ContentCopy,
-                contentDescription = "Copy number",
-                tint = BingoGold,
-                modifier = Modifier
-                  .padding(8.dp)
-                  .size(20.dp)
+            if (selectedMethod.instruction.isNotBlank()) {
+              Spacer(modifier = Modifier.height(6.dp))
+              Text(
+                text = selectedMethod.instruction,
+                color = BingoGoldLight.copy(alpha = 0.85f),
+                fontSize = 11.sp
               )
             }
           }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        // Open Telebirr App / USSD Action Button
+        // Open Provider App / USSD Action Button
         Button(
-          onClick = onOpenTelebirrApp,
+          onClick = { onOpenPaymentApp(selectedMethod) },
           modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .testTag("launch_telebirr_app_button"),
+            .height(46.dp)
+            .testTag("launch_payment_app_button"),
           shape = RoundedCornerShape(12.dp),
           colors = ButtonDefaults.buttonColors(containerColor = BingoPurpleVibrant)
         ) {
           Icon(
-            imageVector = Icons.Default.PhoneAndroid,
+            imageVector = if (selectedMethod == PaymentMethod.CBE) Icons.Default.AccountBalance else Icons.Default.PhoneAndroid,
             contentDescription = null,
             tint = Color.White,
             modifier = Modifier.size(18.dp)
           )
           Spacer(modifier = Modifier.width(8.dp))
           Text(
-            text = "Pay via Telebirr App / USSD",
+            text = when (selectedMethod) {
+              PaymentMethod.TELEBIRR -> "Pay via Telebirr App / USSD (*127#)"
+              PaymentMethod.CBE -> "Pay via CBE Mobile Banking / USSD (*889#)"
+              PaymentMethod.CBE_BIRR -> "Pay via CBE Birr App / USSD (*847#)"
+              PaymentMethod.E_BIRR -> "Pay via E-Birr App / USSD (*841#)"
+            },
             fontWeight = FontWeight.Bold,
-            fontSize = 15.sp,
+            fontSize = 13.sp,
             color = Color.White
           )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Receipt Verification Section
+        val receiptPlaceholder = when (selectedMethod) {
+          PaymentMethod.TELEBIRR -> "CL240899128, https://... or SMS text"
+          PaymentMethod.CBE -> "FT24089..., *889# SMS or reference"
+          PaymentMethod.CBE_BIRR -> "CB24089..., *847# SMS text"
+          PaymentMethod.E_BIRR -> "EB24089..., *841# SMS text"
+        }
+
         PasteableReceiptTextField(
           value = receiptInput,
           onValueChange = { receiptInput = it },
-          label = "Telebirr Receipt ID or Link",
-          placeholder = "CL240899128, https://... or SMS text",
+          label = "${selectedMethod.displayName} Receipt ID or SMS",
+          placeholder = receiptPlaceholder,
           testTag = "telebirr_receipt_input"
         )
 
@@ -278,19 +362,19 @@ fun TelebirrPaymentDialog(
           )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Verify & Confirm Game Entry Button
         Button(
           onClick = {
             if (receiptInput.isNotBlank()) {
-              onVerifyReceipt(receiptInput)
+              onVerifyReceipt(receiptInput, selectedMethod)
             }
           },
           enabled = !isVerifying && receiptInput.isNotBlank(),
           modifier = Modifier
             .fillMaxWidth()
-            .height(52.dp)
+            .height(50.dp)
             .testTag("confirm_telebirr_verification_button"),
           shape = RoundedCornerShape(14.dp),
           colors = ButtonDefaults.buttonColors(
@@ -302,15 +386,15 @@ fun TelebirrPaymentDialog(
         ) {
           if (isVerifying) {
             CircularProgressIndicator(
-              modifier = Modifier.size(24.dp),
+              modifier = Modifier.size(22.dp),
               color = BingoTextDark,
               strokeWidth = 2.5.dp
             )
             Spacer(modifier = Modifier.width(10.dp))
             Text(
-              text = "Verifying with Telebirr...",
+              text = "Verifying with ${selectedMethod.displayName}...",
               fontWeight = FontWeight.Bold,
-              fontSize = 15.sp
+              fontSize = 14.sp
             )
           } else {
             Icon(
@@ -323,7 +407,7 @@ fun TelebirrPaymentDialog(
             Text(
               text = "Verify & Enter Game",
               fontWeight = FontWeight.Bold,
-              fontSize = 16.sp
+              fontSize = 15.sp
             )
           }
         }

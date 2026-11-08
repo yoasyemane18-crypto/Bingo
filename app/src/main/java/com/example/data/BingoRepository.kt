@@ -500,6 +500,7 @@ class BingoRepository(context: Context) {
             amountBirr = o.getInt("amt"),
             receiptId = o.getString("rid"),
             receiptLink = o.optString("link", ""),
+            paymentMethod = o.optString("pm", "telebirr"),
             timestamp = o.getLong("ts"),
             status = RequestStatus.valueOf(o.optString("st", RequestStatus.PENDING.name))
           )
@@ -520,6 +521,7 @@ class BingoRepository(context: Context) {
       o.put("amt", p.amountBirr)
       o.put("rid", p.receiptId)
       o.put("link", p.receiptLink)
+      o.put("pm", p.paymentMethod)
       o.put("ts", p.timestamp)
       o.put("st", p.status.name)
       arr.put(o)
@@ -625,6 +627,7 @@ class BingoRepository(context: Context) {
             phone = o.optString("phone", ""),
             amountBirr = o.getInt("amt"),
             telebirrAccount = o.getString("acct"),
+            paymentMethod = o.optString("pm", "telebirr"),
             timestamp = o.getLong("ts"),
             status = RequestStatus.valueOf(o.optString("st", RequestStatus.PENDING.name))
           )
@@ -644,6 +647,7 @@ class BingoRepository(context: Context) {
       o.put("phone", w.phone)
       o.put("amt", w.amountBirr)
       o.put("acct", w.telebirrAccount)
+      o.put("pm", w.paymentMethod)
       o.put("ts", w.timestamp)
       o.put("st", w.status.name)
       arr.put(o)

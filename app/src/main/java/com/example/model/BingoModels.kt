@@ -126,6 +126,7 @@ data class PaymentRequest(
   val amountBirr: Int,
   val receiptId: String,
   val receiptLink: String,
+  val paymentMethod: String = "telebirr",
   val timestamp: Long = System.currentTimeMillis(),
   val status: RequestStatus = RequestStatus.PENDING
 )
@@ -136,6 +137,7 @@ data class WithdrawalRequest(
   val phone: String,
   val amountBirr: Int,
   val telebirrAccount: String,
+  val paymentMethod: String = "telebirr",
   val timestamp: Long = System.currentTimeMillis(),
   val status: RequestStatus = RequestStatus.PENDING
 )
