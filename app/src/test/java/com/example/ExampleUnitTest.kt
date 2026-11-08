@@ -405,4 +405,14 @@ class ExampleUnitTest {
     assertEquals("Both phones must calculate the exact same remaining countdown down to the millisecond", diffPhoneA, diffPhoneB)
     assertEquals(3600000L, diffPhoneA)
   }
+
+  @Test
+  fun testDateHeaderParsing() {
+    val headers = okhttp3.Headers.Builder()
+      .add("Date", "Sun, 08 Nov 2026 11:49:10 GMT")
+      .build()
+    val date = headers.getDate("Date")
+    assertNotNull(date)
+    assertTrue(date!!.time > 0L)
+  }
 }

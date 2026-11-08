@@ -750,18 +750,13 @@ class BingoRepository(context: Context) {
   }
 
   // Calculates slot start time in epoch millis for offset day and Ethiopian hour (GMT+3)
-  // Authoritatively calibrated with getSynchronizedTimeMs() so every phone computes the identical second
+  // Authoritatively calibrated with getSynchronizedTimeMs() using pure UTC epoch arithmetic
+  // so every phone, irrespective of device locale or local timezone, computes the exact same millisecond
   fun getSlotStartTime(dayOffset: Int, hour: Int): Long {
-    val eatTz = TimeZone.getTimeZone("GMT+3")
-    val cal = Calendar.getInstance(eatTz).apply {
-      timeInMillis = getSynchronizedTimeMs()
-      add(Calendar.DAY_OF_MONTH, dayOffset)
-      set(Calendar.HOUR_OF_DAY, hour)
-      set(Calendar.MINUTE, 0)
-      set(Calendar.SECOND, 0)
-      set(Calendar.MILLISECOND, 0)
-    }
-    return cal.timeInMillis
+    val eatMs = getSynchronizedTimeMs() + 3 * 3600000L
+    val dayStartEat = (eatMs / DAY_MS) * DAY_MS
+    val dayStartEpoch = dayStartEat - 3 * 3600000L
+    return dayStartEpoch + (dayOffset.toLong() * DAY_MS) + (hour.toLong() * 3600000L)
   }
 
   data class SlotInfo(

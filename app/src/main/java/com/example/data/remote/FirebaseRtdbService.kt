@@ -38,22 +38,32 @@ class FirebaseRtdbService {
   private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
   fun fetchServerTimestamp(): Long? {
-    val url = "${FirebaseRtdbConfig.BASE_URL}/server_time.json"
-    val body = "{\".sv\": \"timestamp\"}".toRequestBody(jsonMediaType)
-    val request = Request.Builder().url(url).put(body).build()
-    return try {
-      val tStart = System.currentTimeMillis()
-      httpClient.newCall(request).execute().use { response ->
-        if (!response.isSuccessful) return null
-        val bodyStr = response.body?.string()?.trim() ?: return null
-        val serverMs = bodyStr.toLongOrNull() ?: return null
-        val tEnd = System.currentTimeMillis()
-        val networkLatency = (tEnd - tStart) / 2
-        serverMs + networkLatency
-      }
-    } catch (_: Exception) {
-      null
+    val endpoints = listOf(
+      "https://clients3.google.com/generate_204",
+      "${FirebaseRtdbConfig.BASE_URL}/activities.json?shallow=true"
+    )
+
+    for (url in endpoints) {
+      try {
+        val request = Request.Builder()
+          .url(url)
+          .header("Cache-Control", "no-cache")
+          .get()
+          .build()
+
+        val tStart = System.currentTimeMillis()
+        httpClient.newCall(request).execute().use { response ->
+          val tEnd = System.currentTimeMillis()
+          val date = response.headers.getDate("Date")
+          if (date != null) {
+            val rtt = (tEnd - tStart).coerceAtLeast(0L)
+            val networkLatency = rtt / 2
+            return date.time + networkLatency
+          }
+        }
+      } catch (_: Exception) {}
     }
+    return null
   }
 
   fun fetchAllUsers(): Map<String, UserProfile> {

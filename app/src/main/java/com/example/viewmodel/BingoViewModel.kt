@@ -248,6 +248,9 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
   private fun startCountdownTicker() {
     countdownJob?.cancel()
     var tickerTick = 0
+    // Trigger immediate time calibration on ticker launch
+    repository.syncServerTime()
+
     countdownJob = viewModelScope.launch {
       while (true) {
         val userSlot = _uiState.value.currentUser?.playingTime
@@ -291,8 +294,8 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           }
         }
 
-        // Periodically resync authoritative server time with Firebase
-        if (tickerTick % 20 == 0) {
+        // Periodically resync authoritative server time with Firebase / Google atomic clock
+        if (tickerTick % 10 == 0) {
           repository.syncServerTime()
         }
 
@@ -310,7 +313,11 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           }
         }
 
-        delay(1000L)
+        // Sub-second phase alignment: sleep until the exact millisecond of the next synchronized second boundary
+        val currentNow = repository.getSynchronizedTimeMs()
+        val msIntoSecond = (currentNow % 1000L)
+        val sleepMs = (1000L - msIntoSecond).coerceIn(100L, 1000L)
+        delay(sleepMs)
       }
     }
   }
