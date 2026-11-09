@@ -616,6 +616,136 @@ fun WinnerCelebrationDialog(
 }
 
 @Composable
+fun RemoteWinnerCelebrationDialog(
+  winner: com.example.model.WinnerRecord,
+  currentRound: Int = 1,
+  totalRounds: Int = 3,
+  language: AppLanguage = AppLanguage.EN,
+  onDismiss: () -> Unit
+) {
+  Dialog(onDismissRequest = onDismiss) {
+    Card(
+      shape = RoundedCornerShape(24.dp),
+      colors = CardDefaults.cardColors(containerColor = BingoCardBg),
+      border = androidx.compose.foundation.BorderStroke(2.dp, BingoGold),
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(14.dp)
+        .testTag("remote_winner_celebration_dialog")
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+      ) {
+        Surface(
+          shape = CircleShape,
+          color = BingoPurpleDeep,
+          border = androidx.compose.foundation.BorderStroke(1.5.dp, BingoGold),
+          modifier = Modifier.size(60.dp)
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Text(text = "🏆", fontSize = 30.sp)
+          }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+          text = when (language) {
+            AppLanguage.EN -> "BINGO! WINNER ANNOUNCED!"
+            AppLanguage.AM -> "ቢንጎ! አሸናፊ ተገኝቷል!"
+            AppLanguage.TI -> "ቢንጎ! ተዓዋቲ ተረኺቡ!"
+          },
+          fontFamily = PlayfairFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = 20.sp,
+          color = BingoGold,
+          textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+          text = "Round $currentRound of $totalRounds",
+          fontWeight = FontWeight.SemiBold,
+          fontSize = 13.sp,
+          color = BingoGoldLight
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Card(
+          shape = RoundedCornerShape(16.dp),
+          colors = CardDefaults.cardColors(containerColor = BingoSurface),
+          border = androidx.compose.foundation.BorderStroke(1.dp, BingoBorderPurple),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+          ) {
+            Text(
+              text = "Winner: ${winner.username}",
+              fontWeight = FontWeight.Bold,
+              fontSize = 18.sp,
+              color = BingoGold
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+              text = "Winning Cartela: #${winner.cardNum} (${winner.callCount} calls)",
+              fontWeight = FontWeight.Medium,
+              fontSize = 14.sp,
+              color = BingoTextWhite
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = BingoPurpleDeep,
+              border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold.copy(alpha = 0.6f))
+            ) {
+              Text(
+                text = "Reward: ${winner.rewardBirr} birr",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = BingoGoldLight,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+          text = when (language) {
+            AppLanguage.EN -> if (currentRound < totalRounds) "🛑 Game stopped! Next game starting in 10s..." else "🛑 Game stopped! Session complete."
+            AppLanguage.AM -> if (currentRound < totalRounds) "🛑 ጨዋታው ቆሟል! ቀጣዩ ጨዋታ በ10 ሰከንድ ይጀምራል..." else "🛑 ጨዋታው ቆሟል! ዙሩ ተጠናቋል።"
+            AppLanguage.TI -> if (currentRound < totalRounds) "🛑 ጸወታ ደው ኢሉ! ዝቕጽል ጸወታ ብ10 ካልኢት ይጅምር..." else "🛑 ጸወታ ደው ኢሉ! ተዛዚሙ።"
+          },
+          fontSize = 13.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = BingoTextWhite,
+          textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        LuxuryButton(
+          text = if (currentRound < totalRounds) "Continue to Game ${currentRound + 1}" else "View Session Summary",
+          onClick = onDismiss,
+          isGold = true,
+          testTag = "remote_winner_continue_btn"
+        )
+      }
+    }
+  }
+}
+
+@Composable
 fun SessionSummaryCelebrationDialog(
   slotLabel: String,
   totalWinningsBirr: Int,

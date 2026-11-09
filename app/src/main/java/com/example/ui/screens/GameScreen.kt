@@ -59,7 +59,9 @@ import com.example.model.AppLanguage
 import com.example.model.BingoCard
 import com.example.model.BingoGoal
 import com.example.model.StringsDictionary
+import com.example.model.WinnerRecord
 import com.example.ui.components.ConfettiOverlay
+import com.example.ui.components.RemoteWinnerCelebrationDialog
 import com.example.ui.components.SessionSummaryCelebrationDialog
 import com.example.ui.components.WinnerCelebrationDialog
 import com.example.ui.theme.BingoBorderLight
@@ -109,6 +111,8 @@ fun GameScreen(
   winnerCardNum: Int?,
   winnerCallsCount: Int?,
   winnerNotice: String? = null,
+  remoteWinner: WinnerRecord? = null,
+  showRemoteWinnerDialog: Boolean = false,
   currentRoundNumber: Int = 1,
   totalSessionRounds: Int = 3,
   isIntermission: Boolean = false,
@@ -123,6 +127,7 @@ fun GameScreen(
   onToggleVoiceLang: () -> Unit,
   onBack: () -> Unit,
   onDismissWinDialog: () -> Unit,
+  onDismissRemoteWinnerDialog: () -> Unit = {},
   onSkipIntermission: () -> Unit = {},
   onDismissSessionSummary: () -> Unit = {},
   modifier: Modifier = Modifier
@@ -651,7 +656,7 @@ fun GameScreen(
       modifier = Modifier.fillMaxSize()
     )
 
-    // Winner Dialog
+    // Winner Dialog (When this player wins)
     if (showWinDialog && winnerCardNum != null) {
       WinnerCelebrationDialog(
         winnerCardNum = winnerCardNum,
@@ -661,6 +666,19 @@ fun GameScreen(
         totalRounds = totalSessionRounds,
         onDismiss = {
           onDismissWinDialog()
+        }
+      )
+    }
+
+    // Remote Multiplayer Winner Dialog (When another player calls BINGO)
+    if (showRemoteWinnerDialog && remoteWinner != null) {
+      RemoteWinnerCelebrationDialog(
+        winner = remoteWinner,
+        currentRound = currentRoundNumber,
+        totalRounds = totalSessionRounds,
+        language = language,
+        onDismiss = {
+          onDismissRemoteWinnerDialog()
         }
       )
     }

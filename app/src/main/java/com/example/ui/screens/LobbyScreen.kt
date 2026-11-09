@@ -109,6 +109,7 @@ fun LobbyScreen(
   withdrawalRequests: List<WithdrawalRequest>,
   isCountdownFinished: Boolean = false,
   hasCartelaTicket: Boolean = false,
+  ticketCards: List<Int> = emptyList(),
   occupiedCartelas: Map<Int, String> = emptyMap(),
   onCardSelected: (Int) -> Unit,
   onOccupiedCardClicked: (Int) -> Unit = {},
@@ -304,22 +305,26 @@ fun LobbyScreen(
             val isOccupied = occupiedCartelas.containsKey(cardNum)
             val isOccupiedByOther = isOccupied && occupiedCartelas[cardNum] != currentUser?.username
             val isOccupiedByMe = isOccupied && occupiedCartelas[cardNum] == currentUser?.username
-            val isSelected = selectedCardsList.contains(cardNum) || isOccupiedByMe
+            val isPurchasedTicket = hasCartelaTicket && ticketCards.contains(cardNum)
+            val isSelected = selectedCardsList.contains(cardNum) || isOccupiedByMe || isPurchasedTicket
             val isCurrentPreview = selectedCardNumber == cardNum
 
             val bgColor = when {
+              isPurchasedTicket -> BingoGreen
               isOccupiedByOther -> BingoRed
               isSelected -> BingoGold
               else -> BingoSurface
             }
 
             val borderColor = when {
+              isPurchasedTicket -> BingoGold
               isOccupiedByOther -> BingoRedLight
               isCurrentPreview -> Color.White
               else -> BingoBorderLight
             }
 
             val textColor = when {
+              isPurchasedTicket -> Color.White
               isOccupiedByOther -> Color.White
               isSelected -> BingoTextDark
               else -> BingoTextWhite
@@ -331,7 +336,7 @@ fun LobbyScreen(
                 .clip(RoundedCornerShape(6.dp))
                 .background(bgColor)
                 .border(
-                  width = if (isCurrentPreview || isOccupiedByOther) 2.dp else 1.dp,
+                  width = if (isCurrentPreview || isOccupiedByOther || isPurchasedTicket) 2.dp else 1.dp,
                   color = borderColor,
                   shape = RoundedCornerShape(6.dp)
                 )
@@ -349,7 +354,7 @@ fun LobbyScreen(
                 text = "$cardNum",
                 color = textColor,
                 fontSize = 11.sp,
-                fontWeight = if (isSelected || isOccupiedByOther) FontWeight.Bold else FontWeight.Normal
+                fontWeight = if (isSelected || isOccupiedByOther || isPurchasedTicket) FontWeight.Bold else FontWeight.Normal
               )
             }
           }
@@ -358,6 +363,40 @@ fun LobbyScreen(
     }
 
     Spacer(modifier = Modifier.height(10.dp))
+
+    // If user has purchased cartela tickets for real game, show locked status banner
+    if (hasCartelaTicket && ticketCards.isNotEmpty()) {
+      Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = BingoGreen.copy(alpha = 0.2f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, BingoGreen),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+      ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+          Text(
+            text = when (language) {
+              AppLanguage.EN -> "🔒 Real Game Cartela(s) Locked: #${ticketCards.sorted().joinToString(", #")}"
+              AppLanguage.AM -> "🔒 ለትክክለኛው ጨዋታ የተገዛ ካርቴላ፡ #${ticketCards.sorted().joinToString(", #")} (የተቆለፈ)"
+              AppLanguage.TI -> "🔒 ንትክክለኛ ጸወታ ዝተዓደገ ካርቴላ፡ #${ticketCards.sorted().joinToString(", #")} (ዝተዓሸገ)"
+            },
+            color = BingoGoldLight,
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp
+          )
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text = when (language) {
+              AppLanguage.EN -> "Your purchased card will NEVER change. Playing practice mode with other cards will not affect your real game ticket!"
+              AppLanguage.AM -> "የተገዛው ካርቴላዎ በፍጹም አይቀየርም። በሌላ ካርድ ልምምድ ቢጫወቱ እንኳን ትክክለኛው የጨዋታ ካርድዎ አይቀየርም!"
+              AppLanguage.TI -> "ዝተዓደገ ካርቴላኹም ፈጺሙ ኣይቅየርን። ብኻልእ ካርድ ልምምድ እንተተጻወትኩም እውን ትክክለኛ ካርድኹም ኣይቅየርን!"
+            },
+            color = BingoTextWhite.copy(alpha = 0.9f),
+            fontSize = 11.sp
+          )
+        }
+      }
+      Spacer(modifier = Modifier.height(6.dp))
+    }
 
     // Cartela Selection Summary Text (30 Birr for all 3 consecutive games)
     val selectedCount = selectedCardsList.size

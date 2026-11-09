@@ -55,6 +55,7 @@ data class BingoUiState(
   val isCountdownFinished: Boolean = false,
   val hasCartelaTicketForSession: Boolean = false,
   val ticketCards: List<Int> = emptyList(),
+  val ticketCardSeeds: Map<Int, Long> = emptyMap(),
 
   // Lobby Card Selection
   val selectedCardNumber: Int = 1,
@@ -89,6 +90,8 @@ data class BingoUiState(
   val winnerCallsCount: Int? = null,
   val winnerRewardBirr: Int? = null,
   val winnerNotice: String? = null,
+  val remoteWinner: WinnerRecord? = null,
+  val showRemoteWinnerDialog: Boolean = false,
   val showWinDialog: Boolean = false,
   val showConfetti: Boolean = false,
   val gameStatusMessage: String = "",
@@ -299,16 +302,43 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           repository.syncServerTime()
         }
 
+        // Restore purchased ticket from repository if present and not in state
+        val currentUser = _uiState.value.currentUser
+        if (currentUser != null && !_uiState.value.hasCartelaTicketForSession) {
+          val (savedCards, savedSeeds) = repository.getPurchasedTicket(sessionId, currentUser.username)
+          if (savedCards.isNotEmpty()) {
+            _uiState.update {
+              it.copy(
+                hasCartelaTicketForSession = true,
+                ticketCards = savedCards,
+                ticketCardSeeds = savedSeeds
+              )
+            }
+          }
+        }
+
         if (!isFinished) {
           hasAutoLaunchedForActiveSlot = null
         }
 
         // AUTOMATIC GAME START:
         // When the countdown finishes (00:00:00), the game starts automatically!
-        // No manual clicking needed! All players on different devices start together!
-        if (isFinished && _uiState.value.currentScreen != Screen.GAME && _uiState.value.currentUser != null) {
+        // If user is currently playing a practice game while waiting, practice ends immediately
+        // and the real multiplayer game launches with their exact purchased cartela(s)!
+        val inPractice = _uiState.value.currentScreen == Screen.GAME && _uiState.value.isPracticeMode
+        val notInGame = _uiState.value.currentScreen != Screen.GAME
+
+        if (isFinished && (notInGame || inPractice) && _uiState.value.currentUser != null) {
           if (hasAutoLaunchedForActiveSlot != sessionId) {
             hasAutoLaunchedForActiveSlot = sessionId
+            if (inPractice) {
+              gameLoopJob?.cancel()
+              soundManager.speak(
+                "Practice ended. Real multiplayer game starting now!",
+                "የልምምድ ጨዋታ ተጠናቋል። ትክክለኛው ጨዋታ አሁን ይጀምራል!"
+              )
+              showToast("⏰ Real Game Starting Now!")
+            }
             startScheduledSession()
           }
         }
@@ -924,11 +954,17 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       val updatedOccupied = _uiState.value.occupiedCartelas.toMutableMap()
       selected.forEach { updatedOccupied[it] = user.username }
 
+      val seedsMap = selected.associateWith { cardNum ->
+        if (cardNum == _uiState.value.selectedCardNumber) _uiState.value.cardSeed else 1L
+      }
+      repository.savePurchasedTicket(sessionId, user.username, selected, seedsMap)
+
       _uiState.update {
         it.copy(
           currentUser = updatedUser,
           hasCartelaTicketForSession = true,
           ticketCards = selected,
+          ticketCardSeeds = seedsMap,
           occupiedCartelas = updatedOccupied
         )
       }
@@ -944,7 +980,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           "Starts in: ${_uiState.value.countdownText} when countdown reaches 00:00:00.\n" +
           "All players on different devices start together with identical numbers and target goals!\n" +
           "All 3 games will be played consecutively one after another.\n" +
-          "You can play Practice Mode while waiting!"
+          "You can play Practice Mode while waiting without affecting your purchased cartela(s)!"
       )
       return false
     }
@@ -956,20 +992,29 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
 
   fun startScheduledSession() {
     val user = _uiState.value.currentUser ?: return
-    val selected = if (_uiState.value.ticketCards.isNotEmpty()) {
+    val slot = StringsDictionary.findSlot(user.playingTime) ?: StringsDictionary.SLOTS.first()
+    val slotInfo = repository.getActiveSlotSession(user.playingTime) ?: repository.getNextSlot(user.playingTime)
+    val sessionId = slotInfo.sessionId
+
+    // 1. Recover purchased ticket from persistent repository or current state
+    val (savedCards, savedSeeds) = repository.getPurchasedTicket(sessionId, user.username)
+    val purchasedCards = if (_uiState.value.ticketCards.isNotEmpty()) {
       _uiState.value.ticketCards
+    } else if (savedCards.isNotEmpty()) {
+      savedCards
+    } else emptyList()
+
+    val selected = if (purchasedCards.isNotEmpty()) {
+      purchasedCards
     } else if (_uiState.value.selectedCardsList.isNotEmpty()) {
       _uiState.value.selectedCardsList.sorted()
     } else {
       listOf(_uiState.value.selectedCardNumber.coerceIn(1, 500))
     }
-    val slot = StringsDictionary.findSlot(user.playingTime) ?: StringsDictionary.SLOTS.first()
-    val slotInfo = repository.getActiveSlotSession(user.playingTime) ?: repository.getNextSlot(user.playingTime)
-    val sessionId = slotInfo.sessionId
 
     // If user hasn't manually purchased ticket before countdown reached 00:00:00:
     // Auto-enroll their selected cartela using wallet balance so they start with other players automatically
-    if (!_uiState.value.hasCartelaTicketForSession) {
+    if (!_uiState.value.hasCartelaTicketForSession && savedCards.isEmpty()) {
       val cost = selected.size * BingoRepository.PAY_BIRR
       if (user.walletBalance >= cost) {
         val newBal = user.walletBalance - cost
@@ -984,6 +1029,10 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         )
         repository.saveUser(updatedUser)
         repository.claimCartelas(sessionId, user.username, selected)
+        val seedsMap = selected.associateWith { cardNum ->
+          if (cardNum == _uiState.value.selectedCardNumber) _uiState.value.cardSeed else 1L
+        }
+        repository.savePurchasedTicket(sessionId, user.username, selected, seedsMap)
         viewModelScope.launch(Dispatchers.IO) {
           repository.remoteService.saveUser(updatedUser)
           repository.remoteService.claimSessionCartelas(sessionId, user.username, selected)
@@ -999,14 +1048,17 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
           it.copy(
             currentUser = updatedUser,
             hasCartelaTicketForSession = true,
-            ticketCards = selected
+            ticketCards = selected,
+            ticketCardSeeds = seedsMap
           )
         }
       }
     }
 
+    // Generate real game cards using locked purchased seeds, NEVER practice seeds
     val cards = selected.map { cardNum ->
-      BingoEngine.generateCard(cardNum, _uiState.value.cardSeed)
+      val seed = savedSeeds[cardNum] ?: _uiState.value.ticketCardSeeds[cardNum] ?: 1L
+      BingoEngine.generateCard(cardNum, seed)
     }
 
     val slotLabel = user.playingTime
@@ -1125,10 +1177,12 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         targetGoal = goal,
         isGameEnded = false,
         showWinDialog = false,
+        showRemoteWinnerDialog = false,
         showConfetti = false,
         winnerCardNum = null,
         winnerCallsCount = null,
         winnerNotice = null,
+        remoteWinner = null,
         winnerRewardBirr = roundPrize,
         gameStatusMessage = ""
       )
@@ -1190,13 +1244,20 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
   fun completeSession() {
     intermissionJob?.cancel()
     gameLoopJob?.cancel()
+    val sessionId = _uiState.value.currentSessionId
+    val user = _uiState.value.currentUser
+    if (sessionId != null && user != null) {
+      repository.clearPurchasedTicket(sessionId, user.username)
+    }
     _uiState.update {
       it.copy(
         isGameEnded = true,
         showWinDialog = false,
         isIntermission = false,
         sessionSummaryDialog = true,
-        hasCartelaTicketForSession = false
+        hasCartelaTicketForSession = false,
+        ticketCards = emptyList(),
+        ticketCardSeeds = emptyMap()
       )
     }
     soundManager.announceWin()
@@ -1206,7 +1267,9 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     _uiState.update {
       it.copy(
         sessionSummaryDialog = false,
-        hasCartelaTicketForSession = false
+        hasCartelaTicketForSession = false,
+        ticketCards = emptyList(),
+        ticketCardSeeds = emptyMap()
       )
     }
     navigateTo(Screen.PLAY_LOBBY)
@@ -1234,30 +1297,17 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       // 2. Compute canonical start timestamp for ball drawing
       val ballBaseStartMs = repository.getSynchronizedTimeMs()
 
-      // 3. Concurrent remote winner polling for real multiplayer
+      // 3. Concurrent high-speed remote winner polling for real multiplayer
       val remotePollJob = if (!isPractice && sessionId != null) {
         launch(Dispatchers.IO) {
           while (!_uiState.value.isGameEnded && !_uiState.value.isIntermission) {
-            delay(1500L)
+            delay(600L)
             try {
               val remoteWinner = repository.remoteService.fetchRoundWinner(sessionId, roundNum)
               if (remoteWinner != null && remoteWinner.username.isNotBlank() && remoteWinner.username != myUsername) {
                 // Another player called BINGO on their device!
-                val winMsg = "${remoteWinner.username} called BINGO! (Card #${remoteWinner.cardNum})"
-                val amharicWinMsg = "${remoteWinner.username} ቢንጎ ብሏል! (ካርድ #${remoteWinner.cardNum})"
-                soundManager.speak(winMsg, amharicWinMsg)
-                _uiState.update {
-                  it.copy(
-                    isGameEnded = true,
-                    winnerNotice = winMsg,
-                    gameStatusMessage = winMsg
-                  )
-                }
-                delay(3000L)
-                if (roundNum < 3) {
-                  startIntermissionToNextRound()
-                } else {
-                  completeSession()
+                withContext(Dispatchers.Main) {
+                  onRemotePlayerWon(remoteWinner, roundNum)
                 }
                 break
               }
@@ -1388,6 +1438,9 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       return
     }
 
+    // Stop calling balls immediately as soon as a player wins!
+    gameLoopJob?.cancel()
+
     val winningCard = cards[winningCardIndex]
     val calls = _uiState.value.calledNumbers.size
     val reward = _uiState.value.winnerRewardBirr ?: if (_uiState.value.isPracticeMode) 0 else 70
@@ -1446,7 +1499,8 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       _uiState.update {
         it.copy(
           currentUser = updatedUser,
-          sessionTotalWonBirr = it.sessionTotalWonBirr + reward
+          sessionTotalWonBirr = it.sessionTotalWonBirr + reward,
+          winnersHistory = repository.getWinners()
         )
       }
     }
@@ -1463,15 +1517,64 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       )
     }
 
-    // Automatically advance to intermission countdown after 3s celebration without requiring manual click
+    // Automatically advance to intermission countdown after 3.5s celebration without requiring manual click
     viewModelScope.launch {
-      delay(3000L)
+      delay(3500L)
       _uiState.update { it.copy(showWinDialog = false) }
       if (!_uiState.value.isPracticeMode && currentRound < 3) {
         startIntermissionToNextRound()
       } else if (!_uiState.value.isPracticeMode && currentRound >= 3) {
         completeSession()
       }
+    }
+  }
+
+  fun onRemotePlayerWon(remoteWinner: WinnerRecord, roundNum: Int) {
+    // Stop calling balls immediately on this device!
+    gameLoopJob?.cancel()
+    val winMsg = "${remoteWinner.username} called BINGO! (Card #${remoteWinner.cardNum})"
+    val amharicWinMsg = "${remoteWinner.username} በካርድ #${remoteWinner.cardNum} ቢንጎ ብሏል!"
+    soundManager.speak(
+      "Player ${remoteWinner.username} won Game $roundNum with Card ${remoteWinner.cardNum}!",
+      amharicWinMsg
+    )
+
+    // Save remote winner to local history so Admin and players have it immediately
+    repository.addWinnerLocalOnly(remoteWinner)
+
+    _uiState.update {
+      it.copy(
+        isGameEnded = true,
+        showWinDialog = false,
+        showRemoteWinnerDialog = true,
+        remoteWinner = remoteWinner,
+        winnerCardNum = remoteWinner.cardNum,
+        winnerCallsCount = remoteWinner.callCount,
+        winnerRewardBirr = remoteWinner.rewardBirr,
+        winnerNotice = winMsg,
+        gameStatusMessage = "🏆 $winMsg",
+        winnersHistory = repository.getWinners()
+      )
+    }
+
+    // Automatically transition to next round intermission after 4s
+    viewModelScope.launch {
+      delay(4000L)
+      _uiState.update { it.copy(showRemoteWinnerDialog = false) }
+      if (!_uiState.value.isPracticeMode && roundNum < 3) {
+        startIntermissionToNextRound()
+      } else if (!_uiState.value.isPracticeMode && roundNum >= 3) {
+        completeSession()
+      }
+    }
+  }
+
+  fun dismissRemoteWinnerDialog() {
+    _uiState.update { it.copy(showRemoteWinnerDialog = false) }
+    if (!_uiState.value.isPracticeMode && _uiState.value.currentRoundNumber < 3) {
+      startIntermissionToNextRound()
+    } else if (!_uiState.value.isPracticeMode && _uiState.value.currentRoundNumber >= 3) {
+      completeSession()
     }
   }
 
@@ -1486,10 +1589,34 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
 
   fun stopGame() {
     gameLoopJob?.cancel()
+    val user = _uiState.value.currentUser
+    val userSlot = user?.playingTime
+    val activeSession = repository.getActiveSlotSession(userSlot) ?: repository.getNextSlot(userSlot)
+    val (savedCards, savedSeeds) = if (user != null) repository.getPurchasedTicket(activeSession.sessionId, user.username) else Pair(emptyList(), emptyMap())
+
+    val restoredCards = if (_uiState.value.ticketCards.isNotEmpty()) {
+      _uiState.value.ticketCards
+    } else if (savedCards.isNotEmpty()) {
+      savedCards
+    } else {
+      _uiState.value.selectedCardsList
+    }
+
+    val primaryCard = restoredCards.firstOrNull() ?: 1
+    val primarySeed = savedSeeds[primaryCard] ?: _uiState.value.ticketCardSeeds[primaryCard] ?: 1L
+    val preview = BingoEngine.generateCard(primaryCard, primarySeed)
+
     _uiState.update {
       it.copy(
         isGameEnded = true,
-        readyCountdownStep = null
+        readyCountdownStep = null,
+        isPracticeMode = false,
+        hasCartelaTicketForSession = if (savedCards.isNotEmpty() || it.ticketCards.isNotEmpty()) true else it.hasCartelaTicketForSession,
+        ticketCards = if (savedCards.isNotEmpty()) savedCards else it.ticketCards,
+        ticketCardSeeds = if (savedSeeds.isNotEmpty()) savedSeeds else it.ticketCardSeeds,
+        selectedCardsList = restoredCards,
+        selectedCardNumber = primaryCard,
+        previewCard = preview
       )
     }
   }

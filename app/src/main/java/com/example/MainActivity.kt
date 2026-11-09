@@ -162,6 +162,7 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             withdrawalRequests = uiState.withdrawalRequests,
             isCountdownFinished = uiState.isCountdownFinished,
             hasCartelaTicket = uiState.hasCartelaTicketForSession,
+            ticketCards = uiState.ticketCards,
             occupiedCartelas = uiState.occupiedCartelas,
             onOccupiedCardClicked = { num -> viewModel.notifyOccupiedCard(num) },
             onCardSelected = { num -> viewModel.selectCard(num) },
@@ -199,6 +200,8 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             winnerCardNum = uiState.winnerCardNum,
             winnerCallsCount = uiState.winnerCallsCount,
             winnerNotice = uiState.winnerNotice,
+            remoteWinner = uiState.remoteWinner,
+            showRemoteWinnerDialog = uiState.showRemoteWinnerDialog,
             currentRoundNumber = uiState.currentRoundNumber,
             totalSessionRounds = uiState.totalSessionRounds,
             isIntermission = uiState.isIntermission,
@@ -216,6 +219,7 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
               viewModel.navigateTo(Screen.PLAY_LOBBY)
             },
             onDismissWinDialog = { viewModel.dismissWinDialog() },
+            onDismissRemoteWinnerDialog = { viewModel.dismissRemoteWinnerDialog() },
             onSkipIntermission = { viewModel.skipIntermissionNow() },
             onDismissSessionSummary = { viewModel.dismissSessionSummaryDialog() }
           )

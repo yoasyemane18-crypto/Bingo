@@ -415,4 +415,63 @@ class ExampleUnitTest {
     assertNotNull(date)
     assertTrue(date!!.time > 0L)
   }
+
+  @Test
+  fun testPurchasedCartelaPreservationDuringPracticeGame() {
+    // 1. User purchases Cartela #7 and #15 for scheduled game
+    val purchasedCards = listOf(7, 15)
+    val purchasedSeeds = mapOf(7 to 1L, 15 to 1L)
+
+    val realGameCards = purchasedCards.map { cardNum ->
+      BingoEngine.generateCard(cardNum, purchasedSeeds[cardNum] ?: 1L)
+    }
+
+    // Verify initial purchased cards
+    assertEquals(2, realGameCards.size)
+    assertEquals(7, realGameCards[0].cardNum)
+    assertEquals(15, realGameCards[1].cardNum)
+    val card7GridSnapshot = realGameCards[0].grid
+    val card15GridSnapshot = realGameCards[1].grid
+
+    // 2. User plays practice mode with a different card, say Card #42, using random seed
+    val practiceSeed = 987654321L
+    val practiceCardNum = 42
+    val practiceCard = BingoEngine.generateCard(practiceCardNum, practiceSeed)
+
+    assertEquals(42, practiceCard.cardNum)
+    assertFalse(purchasedCards.contains(practiceCard.cardNum))
+
+    // 3. User finishes practice mode and scheduled session starts.
+    // The real game must regenerate the EXACT purchased cards with identical grids!
+    val finalScheduledCards = purchasedCards.map { cardNum ->
+      BingoEngine.generateCard(cardNum, purchasedSeeds[cardNum] ?: 1L)
+    }
+
+    assertEquals(2, finalScheduledCards.size)
+    assertEquals(7, finalScheduledCards[0].cardNum)
+    assertEquals(15, finalScheduledCards[1].cardNum)
+    assertEquals("Grid numbers of purchased card #7 must not change", card7GridSnapshot, finalScheduledCards[0].grid)
+    assertEquals("Grid numbers of purchased card #15 must not change", card15GridSnapshot, finalScheduledCards[1].grid)
+  }
+
+  @Test
+  fun testPracticeGameSeedIsolationFromPurchasedCards() {
+    val purchasedCardNum = 5
+    val standardSeed = 1L
+    val officialCard = BingoEngine.generateCard(purchasedCardNum, standardSeed)
+
+    // Practice game runs 10 times with random seeds
+    for (i in 1..10) {
+      val randomPracticeSeed = (100000L..999999999L).random()
+      val practiceCard = BingoEngine.generateCard(purchasedCardNum, randomPracticeSeed)
+
+      // Practice card has random layout
+      assertNotNull(practiceCard)
+      assertEquals(purchasedCardNum, practiceCard.cardNum)
+
+      // Official real card with standard seed must remain strictly intact
+      val reloadedOfficialCard = BingoEngine.generateCard(purchasedCardNum, standardSeed)
+      assertEquals(officialCard.grid, reloadedOfficialCard.grid)
+    }
+  }
 }

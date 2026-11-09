@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,12 +11,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -671,22 +674,72 @@ fun AdminScreen(
 
         // Tab 3: Winners
         3 -> {
-          Text(
-            text = "Winners (Last 24 hours): ${winnersHistory.size}",
-            fontWeight = FontWeight.Bold,
-            fontSize = 18.sp,
-            color = BingoGoldLight
-          )
-          Text(
-            text = "Entries are automatically retained for 24 hours.",
-            color = BingoTextMuted,
-            fontSize = 13.sp
-          )
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column {
+              Text(
+                text = "Real Game Winners (${winnersHistory.size})",
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                color = BingoGoldLight
+              )
+              Text(
+                text = "Live Firebase backend registry",
+                color = BingoTextMuted,
+                fontSize = 12.sp
+              )
+            }
 
-          Spacer(modifier = Modifier.height(10.dp))
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = BingoPurpleDeep,
+              border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold.copy(alpha = 0.6f)),
+              modifier = Modifier
+                .clickable { onRefreshData() }
+                .testTag("admin_refresh_winners_btn")
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Refresh,
+                  contentDescription = "Refresh",
+                  tint = BingoGold,
+                  modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                  text = "Sync",
+                  color = BingoGoldLight,
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.SemiBold
+                )
+              }
+            }
+          }
+
+          Spacer(modifier = Modifier.height(12.dp))
 
           if (winnersHistory.isEmpty()) {
-            Text("No winners recorded yet.", color = BingoTextMuted, fontSize = 14.sp)
+            Card(
+              shape = RoundedCornerShape(14.dp),
+              colors = CardDefaults.cardColors(containerColor = BingoCardBg),
+              border = androidx.compose.foundation.BorderStroke(1.dp, BingoBorderPurple),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(24.dp),
+                contentAlignment = Alignment.Center
+              ) {
+                Text("No winners recorded yet in Firebase backend.", color = BingoTextMuted, fontSize = 14.sp)
+              }
+            }
           } else {
             winnersHistory.forEach { rec ->
               Card(
@@ -695,24 +748,102 @@ fun AdminScreen(
                 border = androidx.compose.foundation.BorderStroke(1.dp, BingoBorderPurple),
                 modifier = Modifier
                   .fillMaxWidth()
-                  .padding(vertical = 4.dp)
+                  .padding(vertical = 5.dp)
+                  .testTag("admin_winner_card_${rec.id}")
               ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                      Text(
+                        text = "🏆 ${rec.username}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = BingoGold
+                      )
+                      if (rec.phone.isNotBlank()) {
+                        Text(
+                          text = "Phone: ${rec.phone}",
+                          color = BingoTextMuted,
+                          fontSize = 12.sp
+                        )
+                      }
+                    }
+
+                    Surface(
+                      shape = RoundedCornerShape(8.dp),
+                      color = BingoPurpleDeep,
+                      border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold)
+                    ) {
+                      Text(
+                        text = "${rec.rewardBirr} ETB Won",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = BingoGoldLight,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                      )
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.height(8.dp))
+
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                  ) {
+                    Surface(
+                      shape = RoundedCornerShape(6.dp),
+                      color = BingoNight,
+                      border = androidx.compose.foundation.BorderStroke(1.dp, BingoBorderLight)
+                    ) {
+                      Text(
+                        text = "Game ${rec.roundNumber} of 3",
+                        fontSize = 11.sp,
+                        color = BingoGreenLight,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                      )
+                    }
+
+                    Surface(
+                      shape = RoundedCornerShape(6.dp),
+                      color = BingoNight,
+                      border = androidx.compose.foundation.BorderStroke(1.dp, BingoBorderLight)
+                    ) {
+                      Text(
+                        text = "Cartela #${rec.cardNum}",
+                        fontSize = 11.sp,
+                        color = BingoTextWhite,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                      )
+                    }
+
+                    Surface(
+                      shape = RoundedCornerShape(6.dp),
+                      color = BingoNight,
+                      border = androidx.compose.foundation.BorderStroke(1.dp, BingoBorderLight)
+                    ) {
+                      Text(
+                        text = "${rec.callCount} calls",
+                        fontSize = 11.sp,
+                        color = BingoTextMuted,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                      )
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.height(6.dp))
+
+                  val timeFormatted = java.text.SimpleDateFormat("MMM dd, yyyy · HH:mm:ss", java.util.Locale.US)
+                    .format(java.util.Date(rec.timestamp))
                   Text(
-                    text = "${rec.username} · ${rec.phone}",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = BingoGold
-                  )
-                  Text(
-                    text = "Reward: ${rec.rewardBirr} birr · Card #${rec.cardNum} · ${rec.callCount} calls",
-                    color = BingoTextWhite,
-                    fontSize = 14.sp
-                  )
-                  Text(
-                    text = "Game: ${rec.slotLabel}",
+                    text = "Slot: ${rec.slotLabel} · $timeFormatted",
                     color = BingoTextMuted,
-                    fontSize = 12.sp
+                    fontSize = 11.sp
                   )
                 }
               }

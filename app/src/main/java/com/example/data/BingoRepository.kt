@@ -202,6 +202,20 @@ class BingoRepository(context: Context) {
       if (!remoteAdmin.isNullOrBlank()) {
         prefs.edit().putString("remote_admin_hash", remoteAdmin).apply()
       }
+
+      // 5. Fetch and merge real winners from Firebase RTDB
+      val remoteWinners = remoteService.fetchWinners()
+      if (remoteWinners.isNotEmpty()) {
+        val localWinners = getWinners().toMutableList()
+        val localIds = localWinners.map { it.id }.toSet()
+        remoteWinners.forEach { w ->
+          if (!localIds.contains(w.id)) {
+            localWinners.add(w)
+          }
+        }
+        val mergedSorted = localWinners.sortedByDescending { it.timestamp }
+        saveWinnersLocally(mergedSorted)
+      }
     } catch (_: Exception) {
     }
   }
@@ -710,9 +724,7 @@ class BingoRepository(context: Context) {
     return list
   }
 
-  fun addWinner(record: WinnerRecord) {
-    val list = getWinners().filter { it.id != record.id }.toMutableList()
-    list.add(record)
+  fun saveWinnersLocally(list: List<WinnerRecord>) {
     val arr = JSONArray()
     list.forEach { r ->
       val o = JSONObject()
@@ -728,6 +740,18 @@ class BingoRepository(context: Context) {
       arr.put(o)
     }
     prefs.edit().putString("winners_history", arr.toString()).commit()
+  }
+
+  fun addWinnerLocalOnly(record: WinnerRecord) {
+    val list = getWinners().filter { it.id != record.id }.toMutableList()
+    list.add(0, record)
+    saveWinnersLocally(list)
+  }
+
+  fun addWinner(record: WinnerRecord) {
+    val list = getWinners().filter { it.id != record.id }.toMutableList()
+    list.add(0, record)
+    saveWinnersLocally(list)
     ioScope.launch {
       try {
         remoteService.saveWinner(record)
@@ -867,5 +891,52 @@ class BingoRepository(context: Context) {
         remoteService.claimSessionCartelas(sessionId, username, cardNumbers)
       } catch (_: Exception) {}
     }
+  }
+
+  // --- Session Purchased Cartela Ticket Storage ---
+
+  fun savePurchasedTicket(
+    sessionId: String,
+    username: String,
+    cards: List<Int>,
+    cardSeeds: Map<Int, Long> = emptyMap()
+  ) {
+    try {
+      val obj = JSONObject()
+      val arr = JSONArray()
+      cards.forEach { arr.put(it) }
+      obj.put("cards", arr)
+      val seedsObj = JSONObject()
+      cardSeeds.forEach { (k, v) -> seedsObj.put(k.toString(), v) }
+      obj.put("seeds", seedsObj)
+      prefs.edit().putString("purchased_ticket_${sessionId}_$username", obj.toString()).commit()
+    } catch (_: Exception) {}
+  }
+
+  fun getPurchasedTicket(sessionId: String, username: String): Pair<List<Int>, Map<Int, Long>> {
+    val raw = prefs.getString("purchased_ticket_${sessionId}_$username", null) ?: return Pair(emptyList(), emptyMap())
+    try {
+      val obj = JSONObject(raw)
+      val arr = obj.optJSONArray("cards") ?: JSONArray()
+      val cards = mutableListOf<Int>()
+      for (i in 0 until arr.length()) {
+        cards.add(arr.getInt(i))
+      }
+      val seedsObj = obj.optJSONObject("seeds") ?: JSONObject()
+      val seeds = mutableMapOf<Int, Long>()
+      val keys = seedsObj.keys()
+      while (keys.hasNext()) {
+        val k = keys.next()
+        val num = k.toIntOrNull() ?: continue
+        seeds[num] = seedsObj.optLong(k, 1L)
+      }
+      return Pair(cards, seeds)
+    } catch (_: Exception) {
+      return Pair(emptyList(), emptyMap())
+    }
+  }
+
+  fun clearPurchasedTicket(sessionId: String, username: String) {
+    prefs.edit().remove("purchased_ticket_${sessionId}_$username").commit()
   }
 }
