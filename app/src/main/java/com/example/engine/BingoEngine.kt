@@ -79,4 +79,18 @@ object BingoEngine {
     }
     return null
   }
+
+  // Check if a card satisfies the target goal given a set of called numbers
+  fun checkWinWithCalledNumbers(card: BingoCard, goal: BingoGoal, calledNumbers: Set<Int>): List<Pair<Int, Int>>? {
+    for (pattern in goal.patterns) {
+      val allSatisfied = pattern.cells.all { (col, row) ->
+        val num = card.grid[col][row]
+        num == 0 || calledNumbers.contains(num)
+      }
+      if (allSatisfied) {
+        return pattern.cells
+      }
+    }
+    return null
+  }
 }

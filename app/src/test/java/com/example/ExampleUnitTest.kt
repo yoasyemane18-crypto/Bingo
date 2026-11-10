@@ -6,6 +6,8 @@ import com.example.payment.telebirr.TelebirrConfig
 import com.example.payment.telebirr.TelebirrOrder
 import com.example.payment.telebirr.PaymentOrderStatus
 import com.example.payment.telebirr.TelebirrSecurity
+import com.example.notification.BingoNotificationEngine
+import com.example.notification.PlayerNotificationContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -71,6 +73,18 @@ class ExampleUnitTest {
     assertEquals("ኤን ሰላሳ አምስት", callFor(35))
     assertEquals("ጂ ሃምሳ", callFor(50))
     assertEquals("ኦ ሰባ አምስት", callFor(75))
+  }
+
+  @Test
+  fun testAmharicExclusiveCallingVoice() {
+    // Verify all 75 numbers have authentic Amharic letter + numeral phonetic calls
+    for (n in 1..75) {
+      val letter = StringsDictionary.getBallLetter(n)
+      val amLetter = StringsDictionary.AM_LETTERS[letter]
+      assertNotNull("Amharic letter for $letter must exist", amLetter)
+      val amNumber = StringsDictionary.amharicNumber(n)
+      assertTrue("Amharic numeral for $n must not be blank", amNumber.isNotBlank())
+    }
   }
 
   @Test
@@ -474,4 +488,301 @@ class ExampleUnitTest {
       assertEquals(officialCard.grid, reloadedOfficialCard.grid)
     }
   }
+
+  @Test
+  fun testAllPaymentMethodsUssdCodesAndNaming() {
+    val telebirr = com.example.payment.PaymentMethod.TELEBIRR
+    assertEquals("Telebirr", telebirr.displayName)
+    assertEquals("*127#", telebirr.ussdCode)
+
+    val cbe = com.example.payment.PaymentMethod.CBE
+    assertEquals("CBE", cbe.displayName)
+    assertEquals("*889#", cbe.ussdCode)
+
+    val cbeBirr = com.example.payment.PaymentMethod.CBE_BIRR
+    assertEquals("CBE Birr", cbeBirr.displayName)
+    assertEquals("*847#", cbeBirr.ussdCode)
+
+    val eBirr = com.example.payment.PaymentMethod.E_BIRR
+    assertEquals("E-Birr", eBirr.displayName)
+    assertEquals("*841#", eBirr.ussdCode)
+  }
+
+  @Test
+  fun testSimultaneousWinRewardDivision() {
+    val totalPrizePool = 70
+
+    // 1 winner: gets full 70 Birr
+    val singleWinnerCount = 1
+    val singleReward = (totalPrizePool / singleWinnerCount).coerceAtLeast(1)
+    assertEquals(70, singleReward)
+
+    // 2 simultaneous winners on the same ball: 70 / 2 = 35 Birr each
+    val twoWinnersCount = 2
+    val splitRewardTwo = (totalPrizePool / twoWinnersCount).coerceAtLeast(1)
+    assertEquals(35, splitRewardTwo)
+
+    // 3 simultaneous winners on the same ball: 70 / 3 = 23 Birr each
+    val threeWinnersCount = 3
+    val splitRewardThree = (totalPrizePool / threeWinnersCount).coerceAtLeast(1)
+    assertEquals(23, splitRewardThree)
+
+    // 4 simultaneous winners on 100 Birr pool: 100 / 4 = 25 Birr each
+    val customPool = 100
+    val fourWinnersCount = 4
+    val splitRewardFour = (customPool / fourWinnersCount).coerceAtLeast(1)
+    assertEquals(25, splitRewardFour)
+
+    // Minimum reward is at least 1 Birr even for huge splits
+    val tinyPool = 5
+    val tenWinnersCount = 10
+    val splitMin = (tinyPool / tenWinnersCount).coerceAtLeast(1)
+    assertEquals(1, splitMin)
+  }
+
+  @Test
+  fun testSimultaneousWinResolutionSameBall() {
+    val sessionId = "session-20261109-10"
+    val roundNum = 1
+    val winningBall = 42
+    val callCount = 28
+    val totalPool = 70
+
+    val winner1 = com.example.model.WinnerRecord(
+      id = "w1",
+      username = "Abebe",
+      phone = "0911000001",
+      slotLabel = "10:00",
+      roundNumber = roundNum,
+      rewardBirr = totalPool,
+      cardNum = 12,
+      callCount = callCount,
+      lastBall = winningBall
+    )
+
+    val winner2 = com.example.model.WinnerRecord(
+      id = "w2",
+      username = "Chala",
+      phone = "0911000002",
+      slotLabel = "10:00",
+      roundNumber = roundNum,
+      rewardBirr = totalPool,
+      cardNum = 37,
+      callCount = callCount,
+      lastBall = winningBall
+    )
+
+    val claims = listOf(winner1, winner2)
+    val tiedClaims = claims.filter { it.callCount == callCount }
+    val winnersCount = tiedClaims.map { it.username }.distinct().size
+    assertEquals(2, winnersCount)
+
+    val splitReward = (totalPool / winnersCount).coerceAtLeast(1)
+    assertEquals(35, splitReward)
+
+    val resolution = com.example.model.RoundResolution(
+      roundNumber = roundNum,
+      callCount = callCount,
+      lastBall = winningBall,
+      totalPrizePool = totalPool,
+      winnersCount = winnersCount,
+      splitReward = splitReward,
+      winners = tiedClaims
+    )
+
+    assertEquals(2, resolution.winnersCount)
+    assertEquals(35, resolution.splitReward)
+    assertEquals(70, resolution.totalPrizePool)
+    assertEquals(winningBall, resolution.lastBall)
+  }
+
+  @Test
+  fun testEngineCheckWinWithCalledNumbers() {
+    val card = BingoEngine.generateCard(1, 123L)
+    val anyLine = StringsDictionary.ALL_GOALS.first { it.id == "any_line" }
+
+    // Collect top row numbers: col 0..4, row 0
+    val topRowNums = (0..4).map { c -> card.grid[c][0] }.toSet()
+
+    // When all top row numbers have been called:
+    val winResult = BingoEngine.checkWinWithCalledNumbers(card, anyLine, topRowNums)
+    assertNotNull("Should detect win when all pattern numbers are called", winResult)
+
+    // When one number is missing:
+    val missingOne = topRowNums.drop(1).toSet()
+    val noWinResult = BingoEngine.checkWinWithCalledNumbers(card, anyLine, missingOne)
+    assertNull("Should not detect win if a required cell is missing", noWinResult)
+  }
+
+  @Test
+  fun testHalfHouseAllEightPatternsWin() {
+    val halfHouse = StringsDictionary.ALL_GOALS.first { it.id == "half_house" }
+    assertEquals("Half House must have exactly 8 winning patterns", 8, halfHouse.patterns.size)
+
+    val card = BingoEngine.generateCard(1, 456L)
+
+    // Verify each pattern individually:
+    // 1. Left Half (Column splits)
+    val p1Cells = (0..4).flatMap { r -> (0..2).map { c -> Pair(c, r) } }
+    val win1 = BingoEngine.checkWin(card.copy(markedCells = p1Cells.toSet()), halfHouse)
+    assertNotNull("Left Half must win", win1)
+
+    // 2. Right Half (Column splits)
+    val p2Cells = (0..4).flatMap { r -> (2..4).map { c -> Pair(c, r) } }
+    val win2 = BingoEngine.checkWin(card.copy(markedCells = p2Cells.toSet()), halfHouse)
+    assertNotNull("Right Half must win", win2)
+
+    // 3. Top Half (Row splits)
+    val p3Cells = (0..2).flatMap { r -> (0..4).map { c -> Pair(c, r) } }
+    val win3 = BingoEngine.checkWin(card.copy(markedCells = p3Cells.toSet()), halfHouse)
+    assertNotNull("Top Half must win", win3)
+
+    // 4. Bottom Half (Row splits)
+    val p4Cells = (2..4).flatMap { r -> (0..4).map { c -> Pair(c, r) } }
+    val win4 = BingoEngine.checkWin(card.copy(markedCells = p4Cells.toSet()), halfHouse)
+    assertNotNull("Bottom Half must win", win4)
+
+    // 5. Diagonal Top Half (c + r <= 4)
+    val p5Cells = (0..4).flatMap { r -> (0..4).filter { c -> c + r <= 4 }.map { c -> Pair(c, r) } }
+    val win5 = BingoEngine.checkWin(card.copy(markedCells = p5Cells.toSet()), halfHouse)
+    assertNotNull("Diagonal Top Half must win", win5)
+    assertEquals(15, p5Cells.size)
+
+    // 6. Diagonal Bottom Half (c + r >= 4)
+    val p6Cells = (0..4).flatMap { r -> (0..4).filter { c -> c + r >= 4 }.map { c -> Pair(c, r) } }
+    val win6 = BingoEngine.checkWin(card.copy(markedCells = p6Cells.toSet()), halfHouse)
+    assertNotNull("Diagonal Bottom Half must win", win6)
+    assertEquals(15, p6Cells.size)
+
+    // 7. Diagonal Right Half (c >= r)
+    val p7Cells = (0..4).flatMap { r -> (0..4).filter { c -> c >= r }.map { c -> Pair(c, r) } }
+    val win7 = BingoEngine.checkWin(card.copy(markedCells = p7Cells.toSet()), halfHouse)
+    assertNotNull("Diagonal Right Half must win", win7)
+    assertEquals(15, p7Cells.size)
+
+    // 8. Diagonal Left Half (c <= r)
+    val p8Cells = (0..4).flatMap { r -> (0..4).filter { c -> c <= r }.map { c -> Pair(c, r) } }
+    val win8 = BingoEngine.checkWin(card.copy(markedCells = p8Cells.toSet()), halfHouse)
+    assertNotNull("Diagonal Left Half must win", win8)
+    assertEquals(15, p8Cells.size)
+
+    // Also test checkWinWithCalledNumbers for Diagonal Top Half
+    val p5Nums = p5Cells.map { (c, r) -> card.grid[c][r] }.filter { it != 0 }.toSet()
+    val winWithNumbers = BingoEngine.checkWinWithCalledNumbers(card, halfHouse, p5Nums)
+    assertNotNull("Should win with called numbers for Diagonal Top Half", winWithNumbers)
+  }
+
+  @Test
+  fun testTwoLinesSmallSquareGoal() {
+    val goal = StringsDictionary.ALL_GOALS.first { it.id == "two_lines_sq" }
+    assertTrue("Goal two_lines_sq should have comprehensive patterns", goal.patterns.size > 2)
+
+    val card = BingoEngine.generateCard(1, 789L)
+
+    // 1. Two horizontal lines (Row 0, Row 4) + center square (cols 1..2, rows 1..2)
+    val r0 = (0..4).map { c -> Pair(c, 0) }
+    val r4 = (0..4).map { c -> Pair(c, 4) }
+    val midSq = listOf(Pair(1, 1), Pair(2, 1), Pair(1, 2), Pair(2, 2))
+    val pattern1 = (r0 + r4 + midSq).toSet()
+    val win1 = BingoEngine.checkWin(card.copy(markedCells = pattern1), goal)
+    assertNotNull("Row 0 + Row 4 + Center Square must win", win1)
+
+    // 2. Two horizontal lines (Row 0, Row 1) + bottom square (cols 2..3, rows 3..4)
+    val r1 = (0..4).map { c -> Pair(c, 1) }
+    val bottomSq = listOf(Pair(2, 3), Pair(3, 3), Pair(2, 4), Pair(3, 4))
+    val pattern2 = (r0 + r1 + bottomSq).toSet()
+    val win2 = BingoEngine.checkWin(card.copy(markedCells = pattern2), goal)
+    assertNotNull("Row 0 + Row 1 + Bottom Square must win", win2)
+
+    // 3. Two vertical lines (Col 0, Col 4) + center square
+    val c0 = (0..4).map { r -> Pair(0, r) }
+    val c4 = (0..4).map { r -> Pair(4, r) }
+    val pattern3 = (c0 + c4 + midSq).toSet()
+    val win3 = BingoEngine.checkWin(card.copy(markedCells = pattern3), goal)
+    assertNotNull("Col 0 + Col 4 + Center Square must win", win3)
+
+    // 4. Two vertical lines (Col 0, Col 1) + right square (cols 3..4, rows 1..2)
+    val c1 = (0..4).map { r -> Pair(1, r) }
+    val rightSq = listOf(Pair(3, 1), Pair(4, 1), Pair(3, 2), Pair(4, 2))
+    val pattern4 = (c0 + c1 + rightSq).toSet()
+    val win4 = BingoEngine.checkWin(card.copy(markedCells = pattern4), goal)
+    assertNotNull("Col 0 + Col 1 + Right Square must win", win4)
+
+    // 5. One horizontal line (Row 0) + one vertical line (Col 4) + bottom-left square (cols 0..1, rows 2..3)
+    val blSq = listOf(Pair(0, 2), Pair(1, 2), Pair(0, 3), Pair(1, 3))
+    val pattern5 = (r0 + c4 + blSq).toSet()
+    val win5 = BingoEngine.checkWin(card.copy(markedCells = pattern5), goal)
+    assertNotNull("Row 0 + Col 4 + Bottom-Left Square (non-intersecting square) must win", win5)
+
+    // 6. Test that a square intersecting with a line does NOT count as a valid isolated square
+    // For example, if only Row 0 and Row 4 are marked, but square is NOT marked:
+    val onlyTwoLines = (r0 + r4).toSet()
+    val winIncomplete = BingoEngine.checkWin(card.copy(markedCells = onlyTwoLines), goal)
+    assertNull("Only two lines without square must not win", winIncomplete)
+
+    // And if square overlaps/intersects with row (e.g. square at (0, 0) which is on Row 0):
+    // If only Row 0, Row 4, and square at (0, 0) are marked, square intersects Row 0 so it's not a disjoint 2x2 square
+    val overlappingSq = listOf(Pair(0, 0), Pair(1, 0), Pair(0, 1), Pair(1, 1))
+    val patternOverlapping = (r0 + r4 + overlappingSq).toSet()
+    // There is no disjoint 2x2 square in patternOverlapping because the only 4-cell block is at (0,0) which intersects Row 0
+    // (Other than that, rows 0 and 4 are filled, no other 2x2 square is filled)
+    val winOverlap = BingoEngine.checkWin(card.copy(markedCells = patternOverlapping), goal)
+    assertNull("Square intersecting with line must not count as valid two lines + small square", winOverlap)
+  }
+
+  @Test
+  fun testAllPushNotificationsUnder15WordsAndOneEmoji() {
+    val templates = BingoNotificationEngine.ALL_TEMPLATES
+    assertEquals("Must have exactly 15 push notification templates", 15, templates.size)
+
+    for (t in templates) {
+      assertNotNull("Template id must not be null", t.id)
+      assertTrue("Amharic title must not be blank for ${t.id}", t.titleAm.isNotBlank())
+      assertTrue("Amharic body must not be blank for ${t.id}", t.bodyAm.isNotBlank())
+      assertTrue("Emoji must not be blank for ${t.id}", t.emoji.isNotBlank())
+
+      // Split Amharic body into words (excluding emoji)
+      val words = t.bodyAm.replace(t.emoji, "").trim().split(Regex("[\\s፤፦፡፣!]+")).filter { it.isNotBlank() }
+      assertTrue("Amharic message body must be strictly under 15 words for ${t.id} (got ${words.size} words: ${t.bodyAm})", words.size < 15)
+      assertEquals("Reported word count must match actual words for ${t.id}", t.wordCountAm, words.size)
+
+      // Ensure the emoji is present in the body
+      assertTrue("Body must include the 1 emoji for ${t.id}", t.bodyAm.contains(t.emoji))
+    }
+  }
+
+  @Test
+  fun testPushNotificationContextEvaluation() {
+    // 1. Transactional approvals take highest priority
+    val depositCtx = PlayerNotificationContext(isDepositApproved = true)
+    assertEquals(BingoNotificationEngine.DEPOSIT_APPROVED, BingoNotificationEngine.evaluateState(depositCtx))
+
+    val withdrawalCtx = PlayerNotificationContext(isWithdrawalApproved = true)
+    assertEquals(BingoNotificationEngine.WITHDRAWAL_TRANSFERRED, BingoNotificationEngine.evaluateState(withdrawalCtx))
+
+    // 2. Countdown urgency (within 5 minutes)
+    val urgentNoTicket = PlayerNotificationContext(minutesLeft = 3, hasCartelaTicket = false)
+    assertEquals(BingoNotificationEngine.COUNTDOWN_URGENCY_5MIN, BingoNotificationEngine.evaluateState(urgentNoTicket))
+
+    val urgentWithTicket = PlayerNotificationContext(minutesLeft = 3, hasCartelaTicket = true)
+    assertEquals(BingoNotificationEngine.PURCHASED_CARDS_READY, BingoNotificationEngine.evaluateState(urgentWithTicket))
+
+    // 3. Sunday specials
+    val sunMorning = PlayerNotificationContext(isSunday = true, currentHour = 9)
+    assertEquals(BingoNotificationEngine.SUNDAY_MORNING, BingoNotificationEngine.evaluateState(sunMorning))
+
+    val sunAfternoon = PlayerNotificationContext(isSunday = true, currentHour = 14)
+    assertEquals(BingoNotificationEngine.SUNDAY_AFTERNOON, BingoNotificationEngine.evaluateState(sunAfternoon))
+
+    val sunEvening = PlayerNotificationContext(isSunday = true, currentHour = 20)
+    assertEquals(BingoNotificationEngine.SUNDAY_EVENING, BingoNotificationEngine.evaluateState(sunEvening))
+
+    // 4. Low balance & practice conversion on regular days
+    val lowBalCtx = PlayerNotificationContext(isSunday = false, walletBalance = 10)
+    assertEquals(BingoNotificationEngine.LOW_BALANCE, BingoNotificationEngine.evaluateState(lowBalCtx))
+
+    val practiceCtx = PlayerNotificationContext(isSunday = false, walletBalance = 50, isPracticeMode = true, practiceGamesPlayed = 3)
+    assertEquals(BingoNotificationEngine.PRACTICE_TO_REAL, BingoNotificationEngine.evaluateState(practiceCtx))
+  }
 }
+

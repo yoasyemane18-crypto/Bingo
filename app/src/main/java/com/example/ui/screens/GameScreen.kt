@@ -112,6 +112,10 @@ fun GameScreen(
   winnerCallsCount: Int?,
   winnerNotice: String? = null,
   remoteWinner: WinnerRecord? = null,
+  isTieGame: Boolean = false,
+  tiedWinnersCount: Int = 1,
+  totalPrizePoolBirr: Int = 0,
+  roundWinnersList: List<WinnerRecord> = emptyList(),
   showRemoteWinnerDialog: Boolean = false,
   currentRoundNumber: Int = 1,
   totalSessionRounds: Int = 3,
@@ -583,7 +587,7 @@ fun GameScreen(
               )
             }
 
-            // Voice Language Toggle
+            // Amharic Calling Voice Indicator
             Surface(
               modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
@@ -592,7 +596,7 @@ fun GameScreen(
               color = BingoSurfaceLight
             ) {
               Text(
-                text = if (voiceLanguage == "am") "ድምጽ፡ አማ" else "Voice: EN",
+                text = "🎙️ ድምጽ፡ አማርኛ",
                 color = BingoGold,
                 fontWeight = FontWeight.Bold,
                 fontSize = 13.sp,
@@ -664,6 +668,9 @@ fun GameScreen(
         rewardBirr = rewardBirr,
         roundNumber = currentRoundNumber,
         totalRounds = totalSessionRounds,
+        isTie = isTieGame,
+        tiedWinnersCount = tiedWinnersCount,
+        totalPrizePool = totalPrizePoolBirr,
         onDismiss = {
           onDismissWinDialog()
         }
@@ -674,6 +681,10 @@ fun GameScreen(
     if (showRemoteWinnerDialog && remoteWinner != null) {
       RemoteWinnerCelebrationDialog(
         winner = remoteWinner,
+        winnersList = roundWinnersList,
+        isTie = isTieGame,
+        tiedWinnersCount = tiedWinnersCount,
+        totalPrizePool = totalPrizePoolBirr,
         currentRound = currentRoundNumber,
         totalRounds = totalSessionRounds,
         language = language,

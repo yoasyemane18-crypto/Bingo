@@ -558,6 +558,9 @@ class FirebaseRtdbService {
           rewardBirr = o.optInt("reward", 0),
           cardNum = o.optInt("n", 1),
           callCount = o.optInt("calls", 0),
+          lastBall = o.optInt("lastBall", 0),
+          totalWinnersCount = o.optInt("winnersCount", 1),
+          totalRoundPrizePool = o.optInt("pool", o.optInt("reward", 0)),
           timestamp = o.optLong("at", System.currentTimeMillis())
         )
       }
@@ -577,6 +580,9 @@ class FirebaseRtdbService {
       put("reward", winner.rewardBirr)
       put("n", winner.cardNum)
       put("calls", winner.callCount)
+      put("lastBall", winner.lastBall)
+      put("winnersCount", winner.totalWinnersCount)
+      put("pool", winner.totalRoundPrizePool)
       put("at", winner.timestamp)
     }
     val requestBody = json.toString().toRequestBody(jsonMediaType)
@@ -585,6 +591,164 @@ class FirebaseRtdbService {
       httpClient.newCall(request).execute().use { it.isSuccessful }
     } catch (_: Exception) {
       false
+    }
+  }
+
+  fun postRoundClaim(sessionId: String, roundNum: Int, claim: WinnerRecord): Boolean {
+    val cleanKey = "${claim.username}_${claim.cardNum}".replace(".", "_").replace("#", "_").replace("$", "_")
+    val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/round_$roundNum/claims/$cleanKey.json"
+    val json = JSONObject().apply {
+      put("id", claim.id)
+      put("u", claim.username)
+      put("phone", claim.phone)
+      put("time", claim.slotLabel)
+      put("k", claim.roundNumber)
+      put("n", claim.cardNum)
+      put("calls", claim.callCount)
+      put("lastBall", claim.lastBall)
+      put("reward", claim.rewardBirr)
+      put("at", claim.timestamp)
+    }
+    val requestBody = json.toString().toRequestBody(jsonMediaType)
+    val request = Request.Builder().url(url).put(requestBody).build()
+    return try {
+      httpClient.newCall(request).execute().use { it.isSuccessful }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  fun fetchRoundClaims(sessionId: String, roundNum: Int): List<WinnerRecord> {
+    val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/round_$roundNum/claims.json"
+    val request = Request.Builder().url(url).get().build()
+    val list = mutableListOf<WinnerRecord>()
+    try {
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) return emptyList()
+        val body = response.body?.string() ?: return emptyList()
+        if (body == "null" || body.isBlank()) return emptyList()
+        val root = JSONObject(body)
+        val keys = root.keys()
+        while (keys.hasNext()) {
+          val k = keys.next()
+          val o = root.optJSONObject(k) ?: continue
+          list.add(
+            WinnerRecord(
+              id = o.optString("id", UUID.randomUUID().toString().take(8)),
+              username = o.optString("u", ""),
+              phone = o.optString("phone", ""),
+              slotLabel = o.optString("time", ""),
+              roundNumber = o.optInt("k", roundNum),
+              rewardBirr = o.optInt("reward", 0),
+              cardNum = o.optInt("n", 1),
+              callCount = o.optInt("calls", 0),
+              lastBall = o.optInt("lastBall", 0),
+              timestamp = o.optLong("at", System.currentTimeMillis())
+            )
+          )
+        }
+      }
+    } catch (_: Exception) {}
+    return list
+  }
+
+  fun postRoundResolution(sessionId: String, roundNum: Int, resolution: com.example.model.RoundResolution): Boolean {
+    val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/round_$roundNum/resolution.json"
+    val winnersArr = JSONArray()
+    resolution.winners.forEach { w ->
+      val obj = JSONObject().apply {
+        put("id", w.id)
+        put("u", w.username)
+        put("phone", w.phone)
+        put("time", w.slotLabel)
+        put("k", w.roundNumber)
+        put("reward", w.rewardBirr)
+        put("n", w.cardNum)
+        put("calls", w.callCount)
+        put("lastBall", w.lastBall)
+        put("winnersCount", resolution.winnersCount)
+        put("pool", resolution.totalPrizePool)
+        put("at", w.timestamp)
+      }
+      winnersArr.put(obj)
+    }
+
+    val json = JSONObject().apply {
+      put("roundNumber", resolution.roundNumber)
+      put("callCount", resolution.callCount)
+      put("lastBall", resolution.lastBall)
+      put("totalPrizePool", resolution.totalPrizePool)
+      put("winnersCount", resolution.winnersCount)
+      put("splitReward", resolution.splitReward)
+      put("winners", winnersArr)
+      put("at", resolution.timestamp)
+    }
+
+    // Also update winner.json with a summary record
+    if (resolution.winners.isNotEmpty()) {
+      val names = resolution.winners.map { it.username }.distinct().joinToString(" & ")
+      val primary = resolution.winners.first()
+      val summaryWinner = primary.copy(
+        username = names,
+        rewardBirr = resolution.splitReward,
+        totalWinnersCount = resolution.winnersCount,
+        totalRoundPrizePool = resolution.totalPrizePool
+      )
+      postRoundWinner(sessionId, roundNum, summaryWinner)
+    }
+
+    val requestBody = json.toString().toRequestBody(jsonMediaType)
+    val request = Request.Builder().url(url).put(requestBody).build()
+    return try {
+      httpClient.newCall(request).execute().use { it.isSuccessful }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  fun fetchRoundResolution(sessionId: String, roundNum: Int): com.example.model.RoundResolution? {
+    val url = "${FirebaseRtdbConfig.BASE_URL}/sessions/$sessionId/round_$roundNum/resolution.json"
+    val request = Request.Builder().url(url).get().build()
+    return try {
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) return null
+        val body = response.body?.string() ?: return null
+        if (body == "null" || body.isBlank()) return null
+        val o = JSONObject(body)
+        val arr = o.optJSONArray("winners") ?: JSONArray()
+        val winnersList = mutableListOf<WinnerRecord>()
+        for (i in 0 until arr.length()) {
+          val wObj = arr.getJSONObject(i)
+          winnersList.add(
+            WinnerRecord(
+              id = wObj.optString("id", UUID.randomUUID().toString().take(8)),
+              username = wObj.optString("u", ""),
+              phone = wObj.optString("phone", ""),
+              slotLabel = wObj.optString("time", ""),
+              roundNumber = wObj.optInt("k", roundNum),
+              rewardBirr = wObj.optInt("reward", 0),
+              cardNum = wObj.optInt("n", 1),
+              callCount = wObj.optInt("calls", 0),
+              lastBall = wObj.optInt("lastBall", 0),
+              totalWinnersCount = o.optInt("winnersCount", 1),
+              totalRoundPrizePool = o.optInt("totalPrizePool", 0),
+              timestamp = wObj.optLong("at", System.currentTimeMillis())
+            )
+          )
+        }
+        com.example.model.RoundResolution(
+          roundNumber = o.optInt("roundNumber", roundNum),
+          callCount = o.optInt("callCount", 0),
+          lastBall = o.optInt("lastBall", 0),
+          totalPrizePool = o.optInt("totalPrizePool", 0),
+          winnersCount = o.optInt("winnersCount", winnersList.size.coerceAtLeast(1)),
+          splitReward = o.optInt("splitReward", 0),
+          winners = winnersList,
+          timestamp = o.optLong("at", System.currentTimeMillis())
+        )
+      }
+    } catch (_: Exception) {
+      null
     }
   }
 
@@ -598,7 +762,7 @@ class FirebaseRtdbService {
         val body = response.body?.string() ?: return null
         if (body == "null" || body.isBlank()) return null
         val root = JSONObject(body)
-        return root.optString("hash", null)
+        return if (root.has("hash")) root.optString("hash") else null
       }
     } catch (_: Exception) {
       return null

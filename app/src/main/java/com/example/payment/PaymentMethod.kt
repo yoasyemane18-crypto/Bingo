@@ -6,6 +6,7 @@ package com.example.payment
 enum class PaymentMethod(
   val code: String,
   val displayName: String,
+  val ussdCode: String,
   val receiverAccount: String = "0939383425",
   val receiverName: String = "Yemane",
   val accountLabel: String = "Account / Phone Number",
@@ -14,6 +15,7 @@ enum class PaymentMethod(
   TELEBIRR(
     code = "telebirr",
     displayName = "Telebirr",
+    ussdCode = "*127#",
     receiverAccount = "0939383425",
     receiverName = "Yemane",
     accountLabel = "Telebirr Mobile Number",
@@ -21,7 +23,8 @@ enum class PaymentMethod(
   ),
   CBE(
     code = "cbe",
-    displayName = "CBE (Commercial Bank of Ethiopia)",
+    displayName = "CBE",
+    ussdCode = "*889#",
     receiverAccount = "0939383425",
     receiverName = "Yemane",
     accountLabel = "CBE Account / Phone",
@@ -30,6 +33,7 @@ enum class PaymentMethod(
   CBE_BIRR(
     code = "cbe_birr",
     displayName = "CBE Birr",
+    ussdCode = "*847#",
     receiverAccount = "0939383425",
     receiverName = "Yemane",
     accountLabel = "CBE Birr Phone Number",
@@ -38,6 +42,7 @@ enum class PaymentMethod(
   E_BIRR(
     code = "e_birr",
     displayName = "E-Birr",
+    ussdCode = "*841#",
     receiverAccount = "0939383425",
     receiverName = "Yemane",
     accountLabel = "E-Birr Account / Phone Number",

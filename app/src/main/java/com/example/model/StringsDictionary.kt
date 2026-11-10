@@ -133,12 +133,24 @@ object StringsDictionary {
     }
     list.add(BingoGoal("rectangle", "Rectangle", "አራት ማዕዘን", "ኣርባዕተ ማዕዘን", rectList))
 
-    // 9. Half House (left, right, top, or bottom half)
+    // 9. Half House (8 winning split variants: Left, Right, Top, Bottom, Diagonal Top, Diagonal Bottom, Diagonal Right, Diagonal Left)
     val halfList = listOf(
+      // 1. Left Half (Column splits: columns 0..2)
       GoalPattern((0..4).flatMap { r -> (0..2).map { c -> Pair(c, r) } }),
+      // 2. Right Half (Column splits: columns 2..4)
       GoalPattern((0..4).flatMap { r -> (2..4).map { c -> Pair(c, r) } }),
+      // 3. Top Half (Row splits: rows 0..2)
       GoalPattern((0..2).flatMap { r -> (0..4).map { c -> Pair(c, r) } }),
-      GoalPattern((2..4).flatMap { r -> (0..4).map { c -> Pair(c, r) } })
+      // 4. Bottom Half (Row splits: rows 2..4)
+      GoalPattern((2..4).flatMap { r -> (0..4).map { c -> Pair(c, r) } }),
+      // 5. Diagonal Top Half (anti-diagonal upper triangle: c + r <= 4)
+      GoalPattern((0..4).flatMap { r -> (0..4).filter { c -> c + r <= 4 }.map { c -> Pair(c, r) } }),
+      // 6. Diagonal Bottom Half (anti-diagonal lower triangle: c + r >= 4)
+      GoalPattern((0..4).flatMap { r -> (0..4).filter { c -> c + r >= 4 }.map { c -> Pair(c, r) } }),
+      // 7. Diagonal Right Half (main-diagonal right/upper triangle: c >= r)
+      GoalPattern((0..4).flatMap { r -> (0..4).filter { c -> c >= r }.map { c -> Pair(c, r) } }),
+      // 8. Diagonal Left Half (main-diagonal left/lower triangle: c <= r)
+      GoalPattern((0..4).flatMap { r -> (0..4).filter { c -> c <= r }.map { c -> Pair(c, r) } })
     )
     list.add(BingoGoal("half_house", "Half House", "ግማሽ ቤት", "ፍርቂ ገዛ", halfList))
 
@@ -146,11 +158,40 @@ object StringsDictionary {
     val allCells = (0..4).flatMap { c -> (0..4).map { r -> Pair(c, r) } }
     list.add(BingoGoal("full_house", "Full House", "ሙሉ ቤት", "ምሉእ ገዛ", listOf(GoalPattern(allCells))))
 
-    // 11. Two Lines + Small Square
-    val mid4 = listOf(Pair(1, 1), Pair(2, 1), Pair(1, 2), Pair(2, 2))
-    val tl1 = (tb + mid4).distinct()
-    val tl2 = (lr + mid4).distinct()
-    list.add(BingoGoal("two_lines_sq", "Two Lines + Small Square", "ሁለት መስመር + ትንሽ ካሬ", "ክልተ መስመር + ንእሽቶ ካሬ", listOf(GoalPattern(tl1), GoalPattern(tl2))))
+    // 11. Two Lines + Small Square (two lines in any direction + a 2x2 square block anywhere without contacting/intersecting)
+    val allLines = mutableListOf<List<Pair<Int, Int>>>()
+    for (r in 0..4) allLines.add((0..4).map { c -> Pair(c, r) })
+    for (c in 0..4) allLines.add((0..4).map { r -> Pair(c, r) })
+    allLines.add((0..4).map { i -> Pair(i, i) }) // main diagonal
+    allLines.add((0..4).map { i -> Pair(i, 4 - i) }) // anti-diagonal
+
+    val allSquares = mutableListOf<List<Pair<Int, Int>>>()
+    for (x in 0..3) {
+      for (y in 0..3) {
+        allSquares.add(listOf(Pair(x, y), Pair(x + 1, y), Pair(x, y + 1), Pair(x + 1, y + 1)))
+      }
+    }
+
+    val twoLinesSqPatterns = mutableListOf<GoalPattern>()
+    val seenPatterns = mutableSetOf<Set<Pair<Int, Int>>>()
+
+    for (i in 0 until allLines.size) {
+      val l1 = allLines[i].toSet()
+      for (j in i + 1 until allLines.size) {
+        val l2 = allLines[j].toSet()
+        for (sq in allSquares) {
+          val sqSet = sq.toSet()
+          // Constraint: The 2x2 square block must NOT contact (intersect) either line
+          if (sqSet.none { it in l1 } && sqSet.none { it in l2 }) {
+            val combined = l1 + l2 + sqSet
+            if (seenPatterns.add(combined)) {
+              twoLinesSqPatterns.add(GoalPattern(combined.toList()))
+            }
+          }
+        }
+      }
+    }
+    list.add(BingoGoal("two_lines_sq", "Two Lines + Small Square", "ሁለት መስመር + ትንሽ ካሬ", "ክልተ መስመር + ንእሽቶ ካሬ", twoLinesSqPatterns))
 
     // 12. Plus Sign (center row r=2 and center col c=2)
     val plus = (0..4).map { c -> Pair(c, 2) } + (0..4).map { r -> Pair(2, r) }

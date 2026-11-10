@@ -1,11 +1,14 @@
 package com.example
 
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -73,6 +76,17 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
   val scope = rememberCoroutineScope()
   var isDrawerOpen by remember { mutableStateOf(false) }
   val snackbarHostState = remember { SnackbarHostState() }
+
+  // Runtime Notification Permission for Android 13+ (API 33+)
+  val notificationPermissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestPermission()
+  ) { _ -> }
+
+  LaunchedEffect(Unit) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+    }
+  }
 
   // Listen to toast messages
   LaunchedEffect(uiState.toastMessage) {
@@ -176,6 +190,7 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             },
             onStartPracticeGame = { viewModel.startPracticeGame() },
             onOpenTelebirrGateway = { count -> viewModel.openTelebirrGatewayForGameEntry(count) },
+            onLaunchUssd = { method -> viewModel.launchUssd(method) },
             onSubmitPayment = { amt, r, method -> viewModel.submitPayment(amt, r, method) },
             onSubmitWithdrawal = { amt, acct, method -> viewModel.submitWithdrawal(amt, acct, method) },
             onChangePlayingTime = { newTime -> viewModel.changePlayingTime(newTime) }
@@ -201,6 +216,10 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             winnerCallsCount = uiState.winnerCallsCount,
             winnerNotice = uiState.winnerNotice,
             remoteWinner = uiState.remoteWinner,
+            isTieGame = uiState.isTieGame,
+            tiedWinnersCount = uiState.tiedWinnersCount,
+            totalPrizePoolBirr = uiState.totalPrizePoolBirr,
+            roundWinnersList = uiState.roundWinnersList,
             showRemoteWinnerDialog = uiState.showRemoteWinnerDialog,
             currentRoundNumber = uiState.currentRoundNumber,
             totalSessionRounds = uiState.totalSessionRounds,
@@ -260,7 +279,8 @@ fun YemeBingoApp(viewModel: BingoViewModel) {
             onDeclineWithdrawal = { id -> viewModel.adminDeclineWithdrawal(id) },
             onAdjustBalance = { u, delta -> viewModel.adminAdjustUserBalance(u, delta) },
             onDeleteUser = { u -> viewModel.adminDeleteUser(u) },
-            onRefreshData = { viewModel.refreshData(syncRemote = true) }
+            onRefreshData = { viewModel.refreshData(syncRemote = true) },
+            onSendPushNotification = { pushMsg -> viewModel.sendPushNotification(pushMsg) }
           )
         }
 

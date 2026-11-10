@@ -151,6 +151,20 @@ data class WinnerRecord(
   val rewardBirr: Int,
   val cardNum: Int,
   val callCount: Int,
+  val lastBall: Int = 0,
+  val totalWinnersCount: Int = 1,
+  val totalRoundPrizePool: Int = rewardBirr,
+  val timestamp: Long = System.currentTimeMillis()
+)
+
+data class RoundResolution(
+  val roundNumber: Int,
+  val callCount: Int,
+  val lastBall: Int,
+  val totalPrizePool: Int,
+  val winnersCount: Int,
+  val splitReward: Int,
+  val winners: List<WinnerRecord> = emptyList(),
   val timestamp: Long = System.currentTimeMillis()
 )
 

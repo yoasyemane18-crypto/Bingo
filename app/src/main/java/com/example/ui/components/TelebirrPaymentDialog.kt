@@ -321,14 +321,9 @@ fun TelebirrPaymentDialog(
           )
           Spacer(modifier = Modifier.width(8.dp))
           Text(
-            text = when (selectedMethod) {
-              PaymentMethod.TELEBIRR -> "Pay via Telebirr App / USSD (*127#)"
-              PaymentMethod.CBE -> "Pay via CBE Mobile Banking / USSD (*889#)"
-              PaymentMethod.CBE_BIRR -> "Pay via CBE Birr App / USSD (*847#)"
-              PaymentMethod.E_BIRR -> "Pay via E-Birr App / USSD (*841#)"
-            },
+            text = "Pay with ${selectedMethod.displayName} (${selectedMethod.ussdCode})",
             fontWeight = FontWeight.Bold,
-            fontSize = 13.sp,
+            fontSize = 14.sp,
             color = Color.White
           )
         }

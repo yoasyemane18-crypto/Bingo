@@ -33,7 +33,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Calendar
 import java.util.UUID
+import com.example.notification.BingoNotificationEngine
+import com.example.notification.BingoPushMessage
 
 data class BingoUiState(
   val currentScreen: Screen = Screen.HOME,
@@ -91,6 +94,10 @@ data class BingoUiState(
   val winnerRewardBirr: Int? = null,
   val winnerNotice: String? = null,
   val remoteWinner: WinnerRecord? = null,
+  val isTieGame: Boolean = false,
+  val tiedWinnersCount: Int = 1,
+  val totalPrizePoolBirr: Int = 0,
+  val roundWinnersList: List<WinnerRecord> = emptyList(),
   val showRemoteWinnerDialog: Boolean = false,
   val showWinDialog: Boolean = false,
   val showConfetti: Boolean = false,
@@ -121,6 +128,8 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
   private var gameLoopJob: Job? = null
   private var intermissionJob: Job? = null
   private var hasAutoLaunchedForActiveSlot: String? = null
+  private var lastNotifiedUrgencySessionId: String? = null
+  private var lastSundayNotificationDate: String? = null
 
   init {
     val lang = repository.getSavedLanguage()
@@ -220,14 +229,13 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   fun toggleVoiceLanguage() {
-    val newLang = if (soundManager.voiceLang == "am") "en" else "am"
-    soundManager.voiceLang = newLang
-    _uiState.update { it.copy(voiceLanguage = newLang) }
-    if (newLang == "am") {
-      soundManager.announceReady("Ready")
-    } else {
-      soundManager.speak("Voice: English")
-    }
+    soundManager.voiceLang = "am"
+    _uiState.update { it.copy(voiceLanguage = "am") }
+    showToast(when (_uiState.value.language) {
+      AppLanguage.AM -> "የጥሪ ድምጽ በአማርኛ ብቻ ነው የተዘጋጀው።"
+      AppLanguage.TI -> "ድምጺ ምጽዋዕ ብኣምሓርኛ ጥራይ እዩ ተዳልዩ።"
+      AppLanguage.EN -> "Calling voice is set to Amharic only."
+    })
   }
 
   fun clearToast() {
@@ -319,6 +327,33 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
 
         if (!isFinished) {
           hasAutoLaunchedForActiveSlot = null
+
+          // Urgency Push Notification (5 minutes before game starts)
+          if (diffMs in 1000L..300000L && lastNotifiedUrgencySessionId != sessionId) {
+            lastNotifiedUrgencySessionId = sessionId
+            val pushMsg = if (_uiState.value.hasCartelaTicketForSession) {
+              BingoNotificationEngine.PURCHASED_CARDS_READY
+            } else {
+              BingoNotificationEngine.COUNTDOWN_URGENCY_5MIN
+            }
+            BingoNotificationEngine.showNotification(getApplication(), pushMsg)
+          }
+
+          // Sunday Special Push Notifications (Morning, Afternoon, Evening)
+          val cal = Calendar.getInstance()
+          if (cal.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY) {
+            val todayKey = "${cal.get(Calendar.YEAR)}-${cal.get(Calendar.DAY_OF_YEAR)}"
+            if (lastSundayNotificationDate != todayKey) {
+              lastSundayNotificationDate = todayKey
+              val hour = cal.get(Calendar.HOUR_OF_DAY)
+              val sunMsg = when {
+                hour < 12 -> BingoNotificationEngine.SUNDAY_MORNING
+                hour < 17 -> BingoNotificationEngine.SUNDAY_AFTERNOON
+                else -> BingoNotificationEngine.SUNDAY_EVENING
+              }
+              BingoNotificationEngine.showNotification(getApplication(), sunMsg)
+            }
+          }
         }
 
         // AUTOMATIC GAME START:
@@ -339,6 +374,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
               )
               showToast("⏰ Real Game Starting Now!")
             }
+            BingoNotificationEngine.showNotification(getApplication(), BingoNotificationEngine.SCHEDULED_SESSION_START)
             startScheduledSession()
           }
         }
@@ -701,13 +737,17 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     }
   }
 
+  fun launchUssd(method: com.example.payment.PaymentMethod) {
+    telebirrGateway.launchUssdDirectly(method)
+    showToast("Opening USSD (${method.ussdCode}). Account ${method.receiverAccount} (${method.receiverName}) copied!")
+  }
+
   fun launchPaymentApp(method: com.example.payment.PaymentMethod = com.example.payment.PaymentMethod.TELEBIRR) {
-    val order = _uiState.value.activeTelebirrOrder ?: return
-    telebirrGateway.launchPaymentAppOrUssd(method, order)
+    telebirrGateway.launchUssdDirectly(method)
   }
 
   fun launchTelebirrPaymentApp() {
-    launchPaymentApp(com.example.payment.PaymentMethod.TELEBIRR)
+    launchUssd(com.example.payment.PaymentMethod.TELEBIRR)
   }
 
   fun copyPaymentDetails(method: com.example.payment.PaymentMethod = com.example.payment.PaymentMethod.TELEBIRR) {
@@ -1301,15 +1341,152 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       val remotePollJob = if (!isPractice && sessionId != null) {
         launch(Dispatchers.IO) {
           while (!_uiState.value.isGameEnded && !_uiState.value.isIntermission) {
-            delay(600L)
+            delay(500L)
             try {
               val remoteWinner = repository.remoteService.fetchRoundWinner(sessionId, roundNum)
-              if (remoteWinner != null && remoteWinner.username.isNotBlank() && remoteWinner.username != myUsername) {
-                // Another player called BINGO on their device!
-                withContext(Dispatchers.Main) {
-                  onRemotePlayerWon(remoteWinner, roundNum)
+              if (remoteWinner != null && remoteWinner.username.isNotBlank() && !remoteWinner.username.split(" & ").contains(myUsername)) {
+                // Another player reported BINGO on their device!
+                val targetCallCount = remoteWinner.callCount
+                val targetLastBall = if (remoteWinner.lastBall != 0) remoteWinner.lastBall else fullSequence.getOrNull((targetCallCount - 1).coerceAtLeast(0)) ?: 0
+                val goal = _uiState.value.targetGoal
+                val user = _uiState.value.currentUser
+
+                // Check if any of our active cards ALSO won on that exact same last called ball!
+                var localTiedCard: BingoCard? = null
+                var localTiedCells: List<Pair<Int, Int>>? = null
+
+                if (targetCallCount in 1..fullSequence.size && user != null) {
+                  val calledUpToTarget = fullSequence.take(targetCallCount).toSet()
+                  val calledBeforeTarget = fullSequence.take((targetCallCount - 1).coerceAtLeast(0)).toSet()
+                  for (c in _uiState.value.activeCards) {
+                    val winWithAll = BingoEngine.checkWinWithCalledNumbers(c, goal, calledUpToTarget)
+                    if (winWithAll != null) {
+                      val winBefore = BingoEngine.checkWinWithCalledNumbers(c, goal, calledBeforeTarget)
+                      if (winBefore == null || winWithAll.isNotEmpty()) {
+                        localTiedCard = c
+                        localTiedCells = winWithAll
+                        break
+                      }
+                    }
+                  }
                 }
-                break
+
+                if (localTiedCard != null && user != null) {
+                  // SIMULTANEOUS WIN! Two or more players won at the same time with the same last called ball!
+                  val totalPool = if (remoteWinner.totalRoundPrizePool > 0) remoteWinner.totalRoundPrizePool else (remoteWinner.rewardBirr * remoteWinner.totalWinnersCount).coerceAtLeast(70)
+                  val myTiedClaim = WinnerRecord(
+                    id = UUID.randomUUID().toString().take(8),
+                    username = user.username,
+                    phone = user.phone,
+                    slotLabel = user.playingTime,
+                    roundNumber = roundNum,
+                    rewardBirr = totalPool,
+                    cardNum = localTiedCard.cardNum,
+                    callCount = targetCallCount,
+                    lastBall = targetLastBall,
+                    totalWinnersCount = 2,
+                    totalRoundPrizePool = totalPool
+                  )
+                  repository.remoteService.postRoundClaim(sessionId, roundNum, myTiedClaim)
+                  delay(400L)
+                  val allClaims = repository.remoteService.fetchRoundClaims(sessionId, roundNum)
+                  val tiedClaimsMap = (allClaims + myTiedClaim).associateBy { "${it.username}_${it.cardNum}" }
+                  val tiedClaims = tiedClaimsMap.values.filter { it.callCount == targetCallCount }
+                  val winnersCount = tiedClaims.map { it.username }.distinct().size.coerceAtLeast(2)
+                  val splitReward = (totalPool / winnersCount).coerceAtLeast(1)
+
+                  val res = com.example.model.RoundResolution(
+                    roundNumber = roundNum,
+                    callCount = targetCallCount,
+                    lastBall = targetLastBall,
+                    totalPrizePool = totalPool,
+                    winnersCount = winnersCount,
+                    splitReward = splitReward,
+                    winners = tiedClaims.toList()
+                  )
+                  repository.remoteService.postRoundResolution(sessionId, roundNum, res)
+
+                  // Credit wallet with the divided reward
+                  val newBal = user.walletBalance + splitReward
+                  val tx = WalletTransaction(
+                    id = UUID.randomUUID().toString(),
+                    label = "Reward Game $roundNum/3 (Card #${localTiedCard.cardNum}) [TIE SPLIT: $splitReward Birr of $totalPool Birr divided among $winnersCount winners]",
+                    amount = splitReward
+                  )
+                  val updatedUser = user.copy(
+                    walletBalance = newBal,
+                    transactions = user.transactions + tx
+                  )
+                  repository.saveUser(updatedUser)
+                  repository.remoteService.saveUser(updatedUser)
+
+                  val resolvedRecord = myTiedClaim.copy(
+                    rewardBirr = splitReward,
+                    totalWinnersCount = winnersCount,
+                    totalRoundPrizePool = totalPool
+                  )
+                  repository.addWinner(resolvedRecord)
+                  repository.remoteService.saveWinner(resolvedRecord)
+
+                  repository.remoteService.logActivity(
+                    type = "TIE_WIN",
+                    username = user.username,
+                    amountBirr = splitReward,
+                    description = "🤝 TIE GAME! ${user.username} & ${winnersCount - 1} other(s) won Round $roundNum (Card #${localTiedCard.cardNum}) on ball #$targetLastBall - Split: $splitReward Birr each ($totalPool Birr pool)"
+                  )
+
+                  val updatedCards = _uiState.value.activeCards.map {
+                    if (it.cardNum == localTiedCard.cardNum) it.copy(winningCells = (localTiedCells ?: emptyList()).toSet()) else it
+                  }
+
+                  withContext(Dispatchers.Main) {
+                    _uiState.update {
+                      it.copy(
+                        isGameEnded = true,
+                        activeCards = updatedCards,
+                        currentUser = updatedUser,
+                        sessionTotalWonBirr = it.sessionTotalWonBirr + splitReward,
+                        winnerCardNum = localTiedCard.cardNum,
+                        winnerCallsCount = targetCallCount,
+                        winnerRewardBirr = splitReward,
+                        isTieGame = true,
+                        tiedWinnersCount = winnersCount,
+                        totalPrizePoolBirr = totalPool,
+                        roundWinnersList = tiedClaims.toList(),
+                        showWinDialog = true,
+                        showConfetti = true,
+                        winnersHistory = repository.getWinners()
+                      )
+                    }
+                    soundManager.speak(
+                      "Tie game! $winnersCount players won on ball $targetLastBall! Each winner receives $splitReward Birr!",
+                      "አቻ ጨዋታ! $winnersCount ተጫዋቾች በኳስ $targetLastBall እኩል አሸንፈዋል! ለእያንዳንዳቸው $splitReward ብር ተከፍሏል!"
+                    )
+                  }
+
+                  viewModelScope.launch {
+                    delay(4000L)
+                    _uiState.update { it.copy(showWinDialog = false) }
+                    if (!_uiState.value.isPracticeMode && roundNum < 3) {
+                      startIntermissionToNextRound()
+                    } else if (!_uiState.value.isPracticeMode && roundNum >= 3) {
+                      completeSession()
+                    }
+                  }
+                  break
+                } else {
+                  // Local player did not win on this ball.
+                  val res = repository.remoteService.fetchRoundResolution(sessionId, roundNum)
+                  val winnersList = if (res != null && res.winners.isNotEmpty()) res.winners else listOf(remoteWinner)
+                  val isTie = (res?.winnersCount ?: remoteWinner.totalWinnersCount) > 1 || winnersList.size > 1
+                  val tiedCount = res?.winnersCount ?: remoteWinner.totalWinnersCount.coerceAtLeast(winnersList.size)
+                  val pool = res?.totalPrizePool ?: if (remoteWinner.totalRoundPrizePool > 0) remoteWinner.totalRoundPrizePool else (remoteWinner.rewardBirr * tiedCount).coerceAtLeast(70)
+
+                  withContext(Dispatchers.Main) {
+                    onRemotePlayerWon(remoteWinner, roundNum, winnersList, isTie, tiedCount, pool)
+                  }
+                  break
+                }
               }
             } catch (_: Exception) {}
           }
@@ -1443,67 +1620,16 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
 
     val winningCard = cards[winningCardIndex]
     val calls = _uiState.value.calledNumbers.size
-    val reward = _uiState.value.winnerRewardBirr ?: if (_uiState.value.isPracticeMode) 0 else 70
+    val lastBall = _uiState.value.lastCalledNumber ?: _uiState.value.calledNumbers.lastOrNull() ?: 0
+    val totalRoundPool = _uiState.value.winnerRewardBirr ?: if (_uiState.value.isPracticeMode) 0 else 70
     val currentRound = _uiState.value.currentRoundNumber
     val sessionId = _uiState.value.currentSessionId
+    val user = _uiState.value.currentUser
+    val isPractice = _uiState.value.isPracticeMode
 
     // Highlight winning cells on the card
     val updatedCards = cards.toMutableList()
     updatedCards[winningCardIndex] = winningCard.copy(winningCells = winningCells.toSet())
-
-    soundManager.announceWin()
-
-    val user = _uiState.value.currentUser
-    if (!_uiState.value.isPracticeMode && user != null && reward > 0) {
-      val newBal = user.walletBalance + reward
-      val tx = WalletTransaction(
-        id = UUID.randomUUID().toString(),
-        label = "Reward Game $currentRound/3 (Card #${winningCard.cardNum})",
-        amount = reward
-      )
-      val updatedUser = user.copy(
-        walletBalance = newBal,
-        transactions = user.transactions + tx
-      )
-      repository.saveUser(updatedUser)
-
-      val winnerRecord = WinnerRecord(
-        id = UUID.randomUUID().toString().take(8),
-        username = user.username,
-        phone = user.phone,
-        slotLabel = user.playingTime,
-        roundNumber = currentRound,
-        rewardBirr = reward,
-        cardNum = winningCard.cardNum,
-        callCount = calls
-      )
-      repository.addWinner(winnerRecord)
-
-      // Post round winner, winner wallet, and activity directly to Firebase RTDB immediately
-      viewModelScope.launch(Dispatchers.IO) {
-        try {
-          repository.remoteService.saveWinner(winnerRecord)
-          repository.remoteService.saveUser(updatedUser)
-          if (sessionId != null) {
-            repository.remoteService.postRoundWinner(sessionId, currentRound, winnerRecord)
-          }
-          repository.remoteService.logActivity(
-            type = "PLAYER_WIN",
-            username = user.username,
-            amountBirr = reward,
-            description = "${user.username} won Round $currentRound (Card #${winningCard.cardNum}) - Reward: $reward Birr"
-          )
-        } catch (_: Exception) {}
-      }
-
-      _uiState.update {
-        it.copy(
-          currentUser = updatedUser,
-          sessionTotalWonBirr = it.sessionTotalWonBirr + reward,
-          winnersHistory = repository.getWinners()
-        )
-      }
-    }
 
     _uiState.update {
       it.copy(
@@ -1511,15 +1637,140 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         activeCards = updatedCards,
         winnerCardNum = winningCard.cardNum,
         winnerCallsCount = calls,
-        winnerRewardBirr = reward,
+        winnerRewardBirr = totalRoundPool,
+        totalPrizePoolBirr = totalRoundPool,
         showWinDialog = true,
         showConfetti = true
       )
     }
 
-    // Automatically advance to intermission countdown after 3.5s celebration without requiring manual click
+    if (isPractice || user == null || totalRoundPool <= 0) {
+      soundManager.announceWin()
+      viewModelScope.launch {
+        delay(3500L)
+        _uiState.update { it.copy(showWinDialog = false) }
+      }
+      return
+    }
+
+    // Real multiplayer mode: Register claim and resolve potential simultaneous tie on this ball
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        val myClaim = WinnerRecord(
+          id = UUID.randomUUID().toString().take(8),
+          username = user.username,
+          phone = user.phone,
+          slotLabel = user.playingTime,
+          roundNumber = currentRound,
+          rewardBirr = totalRoundPool,
+          cardNum = winningCard.cardNum,
+          callCount = calls,
+          lastBall = lastBall,
+          totalWinnersCount = 1,
+          totalRoundPrizePool = totalRoundPool
+        )
+
+        // 1. Post claim and broadcast provisional winner so remote devices halt instantly
+        if (sessionId != null) {
+          repository.remoteService.postRoundClaim(sessionId, currentRound, myClaim)
+          repository.remoteService.postRoundWinner(sessionId, currentRound, myClaim)
+        }
+
+        // 2. Allow 800ms for concurrent claims on the exact same ball from other players
+        delay(800L)
+
+        // 3. Fetch all claims on this round to check if two or more players won on the same ball
+        val allClaims = if (sessionId != null) {
+          repository.remoteService.fetchRoundClaims(sessionId, currentRound)
+        } else emptyList()
+
+        val tiedClaimsMap = (allClaims + myClaim).associateBy { "${it.username}_${it.cardNum}" }
+        val tiedClaims = tiedClaimsMap.values.filter { it.callCount == calls }
+        val winnersCount = tiedClaims.map { it.username }.distinct().size.coerceAtLeast(1)
+        val isTie = winnersCount > 1
+        val splitReward = (totalRoundPool / winnersCount).coerceAtLeast(1)
+
+        val resolution = com.example.model.RoundResolution(
+          roundNumber = currentRound,
+          callCount = calls,
+          lastBall = lastBall,
+          totalPrizePool = totalRoundPool,
+          winnersCount = winnersCount,
+          splitReward = splitReward,
+          winners = tiedClaims.toList()
+        )
+
+        if (sessionId != null) {
+          repository.remoteService.postRoundResolution(sessionId, currentRound, resolution)
+        }
+
+        // Credit user wallet with the divided reward
+        val newBal = user.walletBalance + splitReward
+        val txLabel = if (isTie) {
+          "Reward Game $currentRound/3 (Card #${winningCard.cardNum}) [TIE SPLIT: $splitReward Birr of $totalRoundPool Birr divided among $winnersCount winners]"
+        } else {
+          "Reward Game $currentRound/3 (Card #${winningCard.cardNum})"
+        }
+        val tx = WalletTransaction(
+          id = UUID.randomUUID().toString(),
+          label = txLabel,
+          amount = splitReward
+        )
+        val updatedUser = user.copy(
+          walletBalance = newBal,
+          transactions = user.transactions + tx
+        )
+        repository.saveUser(updatedUser)
+        repository.remoteService.saveUser(updatedUser)
+
+        val resolvedWinnerRecord = myClaim.copy(
+          rewardBirr = splitReward,
+          totalWinnersCount = winnersCount,
+          totalRoundPrizePool = totalRoundPool
+        )
+        repository.addWinner(resolvedWinnerRecord)
+        repository.remoteService.saveWinner(resolvedWinnerRecord)
+
+        repository.remoteService.logActivity(
+          type = if (isTie) "TIE_WIN" else "PLAYER_WIN",
+          username = user.username,
+          amountBirr = splitReward,
+          description = if (isTie) {
+            "🤝 TIE GAME! ${user.username} & ${winnersCount - 1} other(s) won Round $currentRound (Card #${winningCard.cardNum}) on ball #$lastBall - Split: $splitReward Birr each ($totalRoundPool Birr pool)"
+          } else {
+            "🏆 ${user.username} won Round $currentRound (Card #${winningCard.cardNum}) - Reward: $splitReward Birr"
+          }
+        )
+
+        withContext(Dispatchers.Main) {
+          _uiState.update {
+            it.copy(
+              currentUser = updatedUser,
+              sessionTotalWonBirr = it.sessionTotalWonBirr + splitReward,
+              winnerRewardBirr = splitReward,
+              isTieGame = isTie,
+              tiedWinnersCount = winnersCount,
+              totalPrizePoolBirr = totalRoundPool,
+              roundWinnersList = tiedClaims.toList(),
+              winnersHistory = repository.getWinners()
+            )
+          }
+
+          if (isTie) {
+            soundManager.speak(
+              "Tie game! $winnersCount players won on ball $lastBall! Each winner receives $splitReward Birr!",
+              "አቻ ጨዋታ! $winnersCount ተጫዋቾች በኳስ $lastBall እኩል አሸንፈዋል! ለእያንዳንዳቸው $splitReward ብር ተከፍሏል!"
+            )
+          } else {
+            soundManager.announceWin()
+          }
+        }
+      } catch (_: Exception) {}
+    }
+
+    // Automatically advance to intermission countdown after 4s
     viewModelScope.launch {
-      delay(3500L)
+      delay(4000L)
       _uiState.update { it.copy(showWinDialog = false) }
       if (!_uiState.value.isPracticeMode && currentRound < 3) {
         startIntermissionToNextRound()
@@ -1529,18 +1780,49 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
     }
   }
 
-  fun onRemotePlayerWon(remoteWinner: WinnerRecord, roundNum: Int) {
+  fun onRemotePlayerWon(
+    remoteWinner: WinnerRecord,
+    roundNum: Int,
+    winnersList: List<WinnerRecord> = emptyList(),
+    isTie: Boolean = false,
+    tiedWinnersCount: Int = 1,
+    totalPrizePool: Int = 0
+  ) {
     // Stop calling balls immediately on this device!
     gameLoopJob?.cancel()
-    val winMsg = "${remoteWinner.username} called BINGO! (Card #${remoteWinner.cardNum})"
-    val amharicWinMsg = "${remoteWinner.username} በካርድ #${remoteWinner.cardNum} ቢንጎ ብሏል!"
-    soundManager.speak(
-      "Player ${remoteWinner.username} won Game $roundNum with Card ${remoteWinner.cardNum}!",
-      amharicWinMsg
-    )
+    val count = if (tiedWinnersCount > 1) tiedWinnersCount else if (winnersList.size > 1) winnersList.size else remoteWinner.totalWinnersCount.coerceAtLeast(1)
+    val pool = if (totalPrizePool > 0) totalPrizePool else if (remoteWinner.totalRoundPrizePool > 0) remoteWinner.totalRoundPrizePool else (remoteWinner.rewardBirr * count).coerceAtLeast(70)
+    val effectiveIsTie = isTie || count > 1
 
-    // Save remote winner to local history so Admin and players have it immediately
-    repository.addWinnerLocalOnly(remoteWinner)
+    val winMsg = if (effectiveIsTie) {
+      "TIE GAME! $count players won! (${remoteWinner.username} and others)"
+    } else {
+      "${remoteWinner.username} called BINGO! (Card #${remoteWinner.cardNum})"
+    }
+    val amharicWinMsg = if (effectiveIsTie) {
+      "አቻ ጨዋታ! $count ተጫዋቾች በተመሳሳይ ኳስ አሸንፈዋል!"
+    } else {
+      "${remoteWinner.username} በካርድ #${remoteWinner.cardNum} ቢንጎ ብሏል!"
+    }
+
+    if (effectiveIsTie) {
+      soundManager.speak(
+        "Tie game! $count players won simultaneously! Reward of $pool Birr divided equally: ${remoteWinner.rewardBirr} Birr each!",
+        "አቻ ጨዋታ! $count ተጫዋቾች እኩል አሸንፈዋል! $pool ብር ተከፋፍሏል!"
+      )
+    } else {
+      soundManager.speak(
+        "Player ${remoteWinner.username} won Game $roundNum with Card ${remoteWinner.cardNum}!",
+        amharicWinMsg
+      )
+    }
+
+    // Save winners to local history so Admin and players have them immediately
+    if (winnersList.isNotEmpty()) {
+      winnersList.forEach { repository.addWinnerLocalOnly(it) }
+    } else {
+      repository.addWinnerLocalOnly(remoteWinner)
+    }
 
     _uiState.update {
       it.copy(
@@ -1548,6 +1830,10 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         showWinDialog = false,
         showRemoteWinnerDialog = true,
         remoteWinner = remoteWinner,
+        isTieGame = effectiveIsTie,
+        tiedWinnersCount = count,
+        totalPrizePoolBirr = pool,
+        roundWinnersList = if (winnersList.isNotEmpty()) winnersList else listOf(remoteWinner),
         winnerCardNum = remoteWinner.cardNum,
         winnerCallsCount = remoteWinner.callCount,
         winnerRewardBirr = remoteWinner.rewardBirr,
@@ -1695,6 +1981,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         }
       }
       withContext(Dispatchers.Main) {
+        BingoNotificationEngine.showNotification(getApplication(), BingoNotificationEngine.DEPOSIT_APPROVED)
         refreshData(syncRemote = true)
         showToast("Payment approved: $approvedAmount birr credited to ${req.username}")
       }
@@ -1742,6 +2029,7 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
         extra = updatedWd.telebirrAccount
       )
       withContext(Dispatchers.Main) {
+        BingoNotificationEngine.showNotification(getApplication(), BingoNotificationEngine.WITHDRAWAL_TRANSFERRED)
         refreshData(syncRemote = true)
         showToast("Withdrawal marked as paid.")
       }
@@ -1880,4 +2168,10 @@ class BingoViewModel(application: Application) : AndroidViewModel(application) {
       )
     }
   }
+
+  fun sendPushNotification(pushMessage: BingoPushMessage) {
+    BingoNotificationEngine.showNotification(getApplication(), pushMessage)
+    showToast("ማስታወቂያ ተልኳል፡ ${pushMessage.titleAm}")
+  }
 }
+

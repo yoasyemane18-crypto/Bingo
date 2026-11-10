@@ -58,6 +58,8 @@ import com.example.model.RequestStatus
 import com.example.model.UserProfile
 import com.example.model.WinnerRecord
 import com.example.model.WithdrawalRequest
+import com.example.notification.BingoNotificationEngine
+import com.example.notification.BingoPushMessage
 import com.example.ui.components.LuxuryButton
 import com.example.ui.theme.BingoBorderLight
 import com.example.ui.theme.BingoBorderPurple
@@ -94,6 +96,7 @@ fun AdminScreen(
   onAdjustBalance: (String, Int) -> Unit,
   onDeleteUser: (String) -> Unit,
   onRefreshData: () -> Unit = {},
+  onSendPushNotification: (BingoPushMessage) -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   var emailInput by remember { mutableStateOf("") }
@@ -206,6 +209,7 @@ fun AdminScreen(
         "Withdrawals (${pendingWds.size})",
         "Winners",
         "Live Feed (${activitiesHistory.size})",
+        "Push Engine (15)",
         "Logout"
       )
 
@@ -222,7 +226,7 @@ fun AdminScreen(
           Tab(
             selected = selectedTab == index,
             onClick = {
-              if (index == 5) {
+              if (index == 6) {
                 onAdminLogout()
               } else {
                 selectedTab = index
@@ -233,7 +237,7 @@ fun AdminScreen(
                 text = title,
                 fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
                 fontSize = 13.sp,
-                color = if (index == 5) BingoRedLight else if (selectedTab == index) BingoGold else BingoTextWhite
+                color = if (index == 6) BingoRedLight else if (selectedTab == index) BingoGold else BingoTextWhite
               )
             }
           )
@@ -942,6 +946,133 @@ fun AdminScreen(
                       fontSize = 11.sp
                     )
                   }
+                }
+              }
+            }
+          }
+        }
+
+        // Tab 5: Push Notification Engine (15 High-Converting Amharic Templates)
+        5 -> {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column {
+              Text(
+                text = "Push Notification Engine (15)",
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                color = BingoGoldLight
+              )
+              Text(
+                text = "High-converting Amharic notifications (<15 words, 1 emoji)",
+                color = BingoGreenLight,
+                fontSize = 12.sp
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.height(12.dp))
+
+          BingoNotificationEngine.ALL_TEMPLATES.forEach { pushMsg ->
+            Card(
+              shape = RoundedCornerShape(12.dp),
+              colors = CardDefaults.cardColors(containerColor = BingoCardBg),
+              border = androidx.compose.foundation.BorderStroke(1.dp, BingoBorderLight),
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 5.dp)
+            ) {
+              Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                      shape = RoundedCornerShape(6.dp),
+                      color = BingoPurpleDeep,
+                      border = androidx.compose.foundation.BorderStroke(1.dp, BingoBorderPurple)
+                    ) {
+                      Text(
+                        text = pushMsg.scenarioTag,
+                        fontSize = 10.sp,
+                        color = BingoGold,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                      )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Text(
+                      text = pushMsg.scenarioTitle,
+                      color = BingoTextWhite,
+                      fontSize = 13.sp,
+                      fontWeight = FontWeight.SemiBold
+                    )
+                  }
+
+                  Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = BingoGreen.copy(alpha = 0.2f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BingoGreenLight)
+                  ) {
+                    Text(
+                      text = "${pushMsg.wordCountAm} words",
+                      fontSize = 11.sp,
+                      color = BingoGreenLight,
+                      fontWeight = FontWeight.Medium,
+                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                  text = "${pushMsg.titleAm} (${pushMsg.titleEn})",
+                  color = BingoGoldLight,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 15.sp
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                  text = pushMsg.bodyAm,
+                  color = BingoTextWhite,
+                  fontSize = 14.sp,
+                  lineHeight = 20.sp
+                )
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Text(
+                  text = pushMsg.bodyEn,
+                  color = BingoTextMuted,
+                  fontSize = 11.sp
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Button(
+                  onClick = { onSendPushNotification(pushMsg) },
+                  colors = ButtonDefaults.buttonColors(containerColor = BingoGold),
+                  shape = RoundedCornerShape(8.dp),
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("push_send_${pushMsg.id}")
+                ) {
+                  Text(
+                    text = "🔔 Send Test Notification (${pushMsg.emoji})",
+                    color = BingoNight,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                  )
                 }
               }
             }

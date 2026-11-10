@@ -261,6 +261,27 @@ class TelebirrPaymentGateway(
   }
 
   /**
+   * Directly redirects to the USSD dialer for the provider (*127#, *889#, *847#, *841#)
+   * and copies the receiver account/phone to clipboard for effortless entry.
+   */
+  fun launchUssdDirectly(method: com.example.payment.PaymentMethod): Boolean {
+    // Copy merchant receiver account to clipboard
+    copyMerchantNumberOnly(method)
+
+    val ussdCode = method.ussdCode
+    return try {
+      val dialUri = Uri.parse("tel:" + Uri.encode(ussdCode))
+      val dialIntent = Intent(Intent.ACTION_DIAL, dialUri).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      context.startActivity(dialIntent)
+      true
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  /**
    * Attempts to launch the payment application for the selected provider (Telebirr, CBE, CBE Birr, E-Birr),
    * falling back to USSD dialing codes (*127#, *889#, *847#, *841#).
    */

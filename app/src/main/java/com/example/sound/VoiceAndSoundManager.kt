@@ -13,13 +13,9 @@ class VoiceAndSoundManager(context: Context) {
     }
 
   var voiceLang: String
-    get() = if (customTtsEngine.activeEngineType == CustomBingoTtsEngine.VoiceEngineType.AMHARIC_SPECIALIZED_PACK) "am" else "en"
-    set(value) {
-      customTtsEngine.activeEngineType = if (value.equals("am", ignoreCase = true)) {
-        CustomBingoTtsEngine.VoiceEngineType.AMHARIC_SPECIALIZED_PACK
-      } else {
-        CustomBingoTtsEngine.VoiceEngineType.ENGLISH_TTS
-      }
+    get() = "am"
+    set(_) {
+      customTtsEngine.activeEngineType = CustomBingoTtsEngine.VoiceEngineType.AMHARIC_SPECIALIZED_PACK
     }
 
   fun speak(textEn: String, textAm: String? = null) {

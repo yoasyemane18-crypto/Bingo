@@ -117,6 +117,7 @@ fun LobbyScreen(
   onStartGame: () -> Unit,
   onStartPracticeGame: () -> Unit = {},
   onOpenTelebirrGateway: (Int) -> Unit = {},
+  onLaunchUssd: (com.example.payment.PaymentMethod) -> Unit = {},
   onSubmitPayment: (Int, String, String) -> Unit,
   onSubmitWithdrawal: (Int, String, String) -> Unit,
   onChangePlayingTime: (String) -> Unit,
@@ -818,15 +819,12 @@ fun LobbyScreen(
 
               Spacer(modifier = Modifier.height(10.dp))
               LuxuryButton(
-                text = "⚡ Open ${selectedDepositMethod.displayName} Gateway",
+                text = "Pay with ${selectedDepositMethod.displayName}",
                 onClick = {
-                  val amt = depositAmount.toIntOrNull() ?: 30
-                  val cartelas = (amt / 30).coerceAtLeast(1)
-                  onOpenTelebirrGateway(cartelas)
-                  activeWalletTab = null
+                  onLaunchUssd(selectedDepositMethod)
                 },
                 isGold = true,
-                testTag = "wallet_launch_telebirr_gateway_btn"
+                testTag = "wallet_pay_with_ussd_btn"
               )
 
               Spacer(modifier = Modifier.height(12.dp))

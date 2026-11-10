@@ -539,6 +539,9 @@ fun WinnerCelebrationDialog(
   rewardBirr: Int?,
   roundNumber: Int = 1,
   totalRounds: Int = 3,
+  isTie: Boolean = false,
+  tiedWinnersCount: Int = 1,
+  totalPrizePool: Int = 0,
   onDismiss: () -> Unit
 ) {
   Dialog(onDismissRequest = onDismiss) {
@@ -558,12 +561,13 @@ fun WinnerCelebrationDialog(
         horizontalAlignment = Alignment.CenterHorizontally
       ) {
         Text(
-          text = "BINGO!",
+          text = if (isTie && tiedWinnersCount > 1) "🤝 BINGO! TIE GAME!" else "BINGO!",
           fontFamily = PlayfairFontFamily,
           fontWeight = FontWeight.Bold,
-          fontSize = 36.sp,
+          fontSize = if (isTie && tiedWinnersCount > 1) 24.sp else 36.sp,
           color = BingoGold,
-          letterSpacing = 2.sp
+          letterSpacing = 1.sp,
+          textAlign = TextAlign.Center
         )
 
         Spacer(modifier = Modifier.height(6.dp))
@@ -575,10 +579,21 @@ fun WinnerCelebrationDialog(
           color = BingoGoldLight
         )
 
+        if (isTie && tiedWinnersCount > 1) {
+          Spacer(modifier = Modifier.height(4.dp))
+          Text(
+            text = "$tiedWinnersCount players won on the exact same ball!",
+            fontWeight = FontWeight.Medium,
+            fontSize = 13.sp,
+            color = BingoGoldLight,
+            textAlign = TextAlign.Center
+          )
+        }
+
         Spacer(modifier = Modifier.height(10.dp))
 
         Text(
-          text = "🏆 Card #$winnerCardNum won in $callCount calls!",
+          text = "🏆 Your Card #$winnerCardNum won in $callCount calls!",
           fontWeight = FontWeight.Bold,
           fontSize = 17.sp,
           color = BingoTextWhite,
@@ -592,13 +607,26 @@ fun WinnerCelebrationDialog(
             color = BingoPurpleDeep,
             border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold)
           ) {
-            Text(
-              text = "Reward: $rewardBirr birr added to wallet",
-              fontWeight = FontWeight.Bold,
-              fontSize = 15.sp,
-              color = BingoGoldLight,
-              modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-            )
+            Column(
+              modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+              horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+              if (isTie && tiedWinnersCount > 1 && totalPrizePool > 0) {
+                Text(
+                  text = "Total Prize Pool: $totalPrizePool birr ($tiedWinnersCount winners split)",
+                  fontWeight = FontWeight.Normal,
+                  fontSize = 12.sp,
+                  color = BingoTextMuted
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+              }
+              Text(
+                text = if (isTie && tiedWinnersCount > 1) "Your Split Reward: $rewardBirr birr added to wallet" else "Reward: $rewardBirr birr added to wallet",
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = BingoGoldLight
+              )
+            }
           }
         }
 
@@ -618,11 +646,19 @@ fun WinnerCelebrationDialog(
 @Composable
 fun RemoteWinnerCelebrationDialog(
   winner: com.example.model.WinnerRecord,
+  winnersList: List<com.example.model.WinnerRecord> = emptyList(),
+  isTie: Boolean = false,
+  tiedWinnersCount: Int = 1,
+  totalPrizePool: Int = 0,
   currentRound: Int = 1,
   totalRounds: Int = 3,
   language: AppLanguage = AppLanguage.EN,
   onDismiss: () -> Unit
 ) {
+  val isMultiWinner = isTie || tiedWinnersCount > 1 || winner.totalWinnersCount > 1 || winnersList.size > 1
+  val count = if (tiedWinnersCount > 1) tiedWinnersCount else if (winnersList.size > 1) winnersList.size else winner.totalWinnersCount.coerceAtLeast(1)
+  val pool = if (totalPrizePool > 0) totalPrizePool else if (winner.totalRoundPrizePool > 0) winner.totalRoundPrizePool else winner.rewardBirr * count
+
   Dialog(onDismissRequest = onDismiss) {
     Card(
       shape = RoundedCornerShape(24.dp),
@@ -646,17 +682,25 @@ fun RemoteWinnerCelebrationDialog(
           modifier = Modifier.size(60.dp)
         ) {
           Box(contentAlignment = Alignment.Center) {
-            Text(text = "🏆", fontSize = 30.sp)
+            Text(text = if (isMultiWinner) "🤝" else "🏆", fontSize = 30.sp)
           }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
 
         Text(
-          text = when (language) {
-            AppLanguage.EN -> "BINGO! WINNER ANNOUNCED!"
-            AppLanguage.AM -> "ቢንጎ! አሸናፊ ተገኝቷል!"
-            AppLanguage.TI -> "ቢንጎ! ተዓዋቲ ተረኺቡ!"
+          text = if (isMultiWinner) {
+            when (language) {
+              AppLanguage.EN -> "TIE GAME! $count WINNERS!"
+              AppLanguage.AM -> "አቻ ጨዋታ! $count አሸናፊዎች!"
+              AppLanguage.TI -> "ማዕረ ጸወታ! $count ተዓወትቲ!"
+            }
+          } else {
+            when (language) {
+              AppLanguage.EN -> "BINGO! WINNER ANNOUNCED!"
+              AppLanguage.AM -> "ቢንጎ! አሸናፊ ተገኝቷል!"
+              AppLanguage.TI -> "ቢንጎ! ተዓዋቲ ተረኺቡ!"
+            }
           },
           fontFamily = PlayfairFontFamily,
           fontWeight = FontWeight.Bold,
@@ -674,6 +718,20 @@ fun RemoteWinnerCelebrationDialog(
           color = BingoGoldLight
         )
 
+        if (isMultiWinner) {
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text = when (language) {
+              AppLanguage.EN -> "$count players won simultaneously on the same last called ball!"
+              AppLanguage.AM -> "$count ተጫዋቾች በተመሳሳይ የመጨረሻ ኳስ እኩል አሸንፈዋል!"
+              AppLanguage.TI -> "$count ተጻወትቲ ብተመሳሳሊ ናይ መወዳእታ ኲዕሶ ማዕረ ተዓዊቶም!"
+            },
+            fontSize = 12.sp,
+            color = BingoTextMuted,
+            textAlign = TextAlign.Center
+          )
+        }
+
         Spacer(modifier = Modifier.height(14.dp))
 
         Card(
@@ -688,32 +746,66 @@ fun RemoteWinnerCelebrationDialog(
               .padding(14.dp),
             horizontalAlignment = Alignment.CenterHorizontally
           ) {
-            Text(
-              text = "Winner: ${winner.username}",
-              fontWeight = FontWeight.Bold,
-              fontSize = 18.sp,
-              color = BingoGold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-              text = "Winning Cartela: #${winner.cardNum} (${winner.callCount} calls)",
-              fontWeight = FontWeight.Medium,
-              fontSize = 14.sp,
-              color = BingoTextWhite
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Surface(
-              shape = RoundedCornerShape(8.dp),
-              color = BingoPurpleDeep,
-              border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold.copy(alpha = 0.6f))
-            ) {
+            if (isMultiWinner) {
               Text(
-                text = "Reward: ${winner.rewardBirr} birr",
+                text = "Winners (${count} players):",
                 fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-                color = BingoGoldLight,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                fontSize = 15.sp,
+                color = BingoGold
               )
+              Spacer(modifier = Modifier.height(4.dp))
+              val displayWinners = if (winnersList.isNotEmpty()) winnersList else listOf(winner)
+              displayWinners.forEach { w ->
+                Text(
+                  text = "• ${w.username} · Card #${w.cardNum} (${w.rewardBirr} birr)",
+                  fontWeight = FontWeight.Medium,
+                  fontSize = 13.sp,
+                  color = BingoTextWhite
+                )
+              }
+              Spacer(modifier = Modifier.height(6.dp))
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = BingoPurpleDeep,
+                border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold.copy(alpha = 0.6f))
+              ) {
+                Text(
+                  text = "Reward: $pool birr divided ($count winners · ${winner.rewardBirr} birr each)",
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 12.sp,
+                  color = BingoGoldLight,
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                  textAlign = TextAlign.Center
+                )
+              }
+            } else {
+              Text(
+                text = "Winner: ${winner.username}",
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                color = BingoGold
+              )
+              Spacer(modifier = Modifier.height(4.dp))
+              Text(
+                text = "Winning Cartela: #${winner.cardNum} (${winner.callCount} calls)",
+                fontWeight = FontWeight.Medium,
+                fontSize = 14.sp,
+                color = BingoTextWhite
+              )
+              Spacer(modifier = Modifier.height(6.dp))
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = BingoPurpleDeep,
+                border = androidx.compose.foundation.BorderStroke(1.dp, BingoGold.copy(alpha = 0.6f))
+              ) {
+                Text(
+                  text = "Reward: ${winner.rewardBirr} birr",
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 14.sp,
+                  color = BingoGoldLight,
+                  modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+              }
             }
           }
         }

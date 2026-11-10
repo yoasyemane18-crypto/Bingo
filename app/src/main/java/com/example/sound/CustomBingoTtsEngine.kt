@@ -71,82 +71,62 @@ class CustomBingoTtsEngine(private val context: Context) : TextToSpeech.OnInitLi
 
   /**
    * Main Bingo Ball Announcer
-   * Calls the number with accurate pronunciation and authentic native accent.
+   * Calls the number exclusively in native Amharic.
    */
   fun callBingoBall(number: Int) {
     if (isSoundMuted) return
 
-    when (activeEngineType) {
-      VoiceEngineType.AMHARIC_SPECIALIZED_PACK -> {
-        // High-fidelity native Amharic audio calling
-        val success = amharicPack.playBallCall(number, volume = volumeLevel)
-        if (!success) {
-          playAcousticChime(660, 120)
-        }
-      }
-
-      VoiceEngineType.ENGLISH_TTS -> {
-        val letter = StringsDictionary.getBallLetter(number)
-        val enLetter = StringsDictionary.EN_LETTERS[letter] ?: letter
-        val digits = number.toString().map { StringsDictionary.EN_DIGITS[it - '0'] }.joinToString(", ")
-        val phrase = "$enLetter, $number. $digits."
-        speakEnglishPhrase(phrase)
-      }
+    // Calling voice is exclusively Amharic
+    val success = amharicPack.playBallCall(number, volume = volumeLevel)
+    if (!success) {
+      val phoneticText = amharicPack.getBallPhoneticText(number)
+      amharicPack.speakDynamicAmharic(phoneticText, volume = volumeLevel)
     }
   }
 
   /**
-   * Countdown Announcer ("Ready", "3", "2", "1")
+   * Countdown Announcer ("ተዘጋጁ", "ሶስት", "ሁለት", "አንድ") exclusively in Amharic
    */
   fun callCountdown(step: String) {
     if (isSoundMuted) return
 
-    when (activeEngineType) {
-      VoiceEngineType.AMHARIC_SPECIALIZED_PACK -> {
-        val success = amharicPack.playCountdownStep(step, volume = volumeLevel)
-        if (!success) {
-          playAcousticChime(880, 100)
-        }
+    val success = amharicPack.playCountdownStep(step, volume = volumeLevel)
+    if (!success) {
+      val amharicStep = when (step) {
+        "Ready" -> "ተዘጋጁ"
+        "3" -> "ሶስት"
+        "2" -> "ሁለት"
+        "1" -> "አንድ"
+        else -> step
       }
-
-      VoiceEngineType.ENGLISH_TTS -> {
-        speakEnglishPhrase(step)
-      }
+      amharicPack.speakDynamicAmharic(amharicStep, volume = volumeLevel)
     }
   }
 
   /**
-   * Celebration & Win Announcer
+   * Celebration & Win Announcer exclusively in Amharic
    */
   fun callWin() {
     if (isSoundMuted) return
 
-    when (activeEngineType) {
-      VoiceEngineType.AMHARIC_SPECIALIZED_PACK -> {
-        amharicPack.playWinCelebration(volume = volumeLevel)
-      }
-
-      VoiceEngineType.ENGLISH_TTS -> {
-        speakEnglishPhrase("Bingo! You win!")
-      }
+    val success = amharicPack.playWinCelebration(volume = volumeLevel)
+    if (!success) {
+      amharicPack.speakDynamicAmharic("ቢንጎ! አሸንፈዋል!", volume = volumeLevel)
     }
     playCelebrationFanfare()
   }
 
   /**
-   * General speech synthesis with multilingual routing
+   * General speech synthesis routed exclusively to Amharic
    */
   fun speak(textEn: String, textAm: String? = null) {
     if (isSoundMuted) return
 
-    if (activeEngineType == VoiceEngineType.AMHARIC_SPECIALIZED_PACK && !textAm.isNullOrEmpty()) {
-      when (textAm) {
-        "ተዘጋጁ" -> amharicPack.playCountdownStep("Ready", volume = volumeLevel)
-        "ቢንጎ! አሸንፈዋል!" -> amharicPack.playWinCelebration(volume = volumeLevel)
-        else -> amharicPack.speakDynamicAmharic(textAm, volume = volumeLevel)
-      }
-    } else {
-      speakEnglishPhrase(textEn)
+    val phrase = if (!textAm.isNullOrBlank()) textAm else textEn
+    when (phrase) {
+      "ተዘጋጁ" -> amharicPack.playCountdownStep("Ready", volume = volumeLevel)
+      "ቢንጎ! አሸንፈዋል!" -> amharicPack.playWinCelebration(volume = volumeLevel)
+      else -> amharicPack.speakDynamicAmharic(phrase, volume = volumeLevel)
     }
   }
 
